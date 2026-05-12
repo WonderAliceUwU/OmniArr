@@ -1,0 +1,15 @@
+services:
+  omniarr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omniarr
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      OMNIARR_DATA_DIR: /app/data
+      TMDB_BEARER_TOKEN: ""
+    volumes:
+      - ./data:/app/data
