@@ -1,0 +1,149 @@
+### macOS
+# Finder metadata
+.DS_Store
+
+# Thumbnails
+._*
+
+# Custom folder icons
+Icon
+
+# Volume root files
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+### JetBrains
+# JetBrains IDE directory
+.idea/
+
+# CMake build directories
+cmake-build-*/
+
+# File-based project format
+*.iws
+*.iml
+
+# IntelliJ build output
+out/
+
+### Go
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work.sum
+
+# env file
+.env
+.env.*
+!.env.example
+
+### Node
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Runtime data
+*.pid
+*.pid.lock
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output
+
+# Build output
+dist/
+dist-server/
+build/Release
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Framework build output and caches
+.cache
+.parcel-cache
+.next
+out/
+.nuxt
+
+# dotenv environment variable files
+.env
+.env.local
+.env.*.local
+
+# npm cache directory
+.npm
+*.tgz
+
+# yarn v2
+.yarn/cache
+.yarn/unplugged
+.yarn/install-state.gz
+.pnp.*
+
+### Python
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# dotenv environment variable files
+.env
+
+# Virtual environments
+.venv
+env/
+venv/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Type checkers
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+# .python-version
+
+### Project secrets
+# Local persisted app secrets/config
+data/*.secure.json
+omniarr/data/*.secure.json
+
+# Server-side compiled JS artifacts generated from TS sources
+server/**/*.js
+shared/**/*.js
