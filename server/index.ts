@@ -9,6 +9,7 @@ import {
   getDashboard,
   getDownloads,
   getHubPage,
+  getTmdbLogos,
   getServiceOptions,
   loadJellyfinUsers,
   proxyJellyfinImage,
@@ -196,13 +197,15 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname.startsWith('/api/hubs/') && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
-    const page = decodeURIComponent(url.pathname.replace('/api/hubs/', '')) as
-      | 'stream'
-      | 'home'
-      | 'anime'
-      | 'dorama'
-      | 'library';
-    sendJson(response, 200, await getHubPage(config, page));
+    const page = decodeURIComponent(url.pathname.replace('/api/hubs/', ''));
+    console.log(`[API] GET /api/hubs/${page}`);
+    try {
+      const result = await getHubPage(config, page as any);
+      sendJson(response, 200, result);
+    } catch (err) {
+      console.error(`[API] Error in GET /api/hubs/${page}:`, err);
+      sendJson(response, 500, { error: err instanceof Error ? err.message : 'Internal server error' });
+    }
     return;
   }
 
@@ -248,6 +251,22 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
       'Cache-Control': 'private, max-age=300'
     });
     response.end(Buffer.from(image.data));
+    return;
+  }
+
+  if (url.pathname === '/api/tmdb/logo' && method === 'GET') {
+    const config = await readConfig(session!.encryptionKey);
+    const tmdbId = Number(url.searchParams.get('tmdbId') || 0);
+    const mediaTypeParam = url.searchParams.get('mediaType');
+    const mediaType = mediaTypeParam === 'tv' ? 'tv' : mediaTypeParam === 'movie' ? 'movie' : null;
+
+    if (!tmdbId || !mediaType) {
+      sendJson(response, 400, { error: 'tmdbId and mediaType are required.' });
+      return;
+    }
+
+    const logos = await getTmdbLogos(config, tmdbId, mediaType);
+    sendJson(response, 200, { logos });
     return;
   }
 

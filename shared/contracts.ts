@@ -3,6 +3,11 @@ export type AppRoute =
   | 'home'
   | 'anime'
   | 'dorama'
+  | 'netflix'
+  | 'primevideo'
+  | 'hbo'
+  | 'viki'
+  | 'disney'
   | 'library'
   | 'downloads'
   | 'settings';
@@ -89,11 +94,23 @@ export interface MediaCard {
   mediaType: 'movie' | 'tv' | 'episode' | 'series' | 'mixed';
   posterUrl: string;
   backdropUrl: string;
+  logoUrl?: string;
   badge?: string;
   progress?: number;
   secondaryValue?: string;
+  hoverLabel?: string;
   actionLabel?: string;
   accent?: string;
+  popularity?: number;
+  voteAverage?: number;
+  voteCount?: number;
+  originalLanguage?: string;
+  releaseDate?: string;
+  firstAirDate?: string;
+  lastAirDate?: string;
+  seasonCount?: number;
+  mediaStatus?: string;
+  genreIds?: number[];
 }
 
 export interface DownloadItem {
@@ -126,7 +143,7 @@ export interface HubSection {
 }
 
 export interface HubPageResponse {
-  page: 'stream' | 'home' | 'anime' | 'dorama' | 'library';
+  page: 'stream' | 'home' | 'anime' | 'dorama' | 'netflix' | 'primevideo' | 'hbo' | 'viki' | 'disney' | 'library';
   hero: MediaCard[];
   continueWatching?: MediaCard[];
   sections: HubSection[];
