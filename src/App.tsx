@@ -1,8 +1,11 @@
 import {
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   startTransition,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
 } from 'react'
 import { api } from './api'
@@ -16,10 +19,14 @@ import {
   type MediaCard,
   type SelectOption,
   type ServiceOptionsResponse,
+  type TitleDetailsResponse,
 } from '../shared/contracts'
 
 type AuthState = 'loading' | 'setup' | 'login' | 'app'
 type EntryStage = 'onboarding' | 'profiles' | 'dashboard'
+const MAX_CACHED_HUB_PAGES = 3
+type ModalOriginRect = { left: number; top: number; width: number; height: number }
+type SelectedCardState = { card: MediaCard; originRect: ModalOriginRect | null }
 
 const sidebarItems: Array<{ route: AppRoute; label: string; short: string }> = [
   { route: 'home', label: 'Inicio', short: 'H' },
@@ -59,7 +66,8 @@ function App() {
   const [connections, setConnections] = useState<ConnectionStatus[]>([])
   const [hubPages, setHubPages] = useState<Partial<Record<HubPageResponse['page'], HubPageResponse>>>({})
   const [hubLoading, setHubLoading] = useState(false)
-  const [selectedCard, setSelectedCard] = useState<MediaCard | null>(null)
+  const [selectedCard, setSelectedCard] = useState<SelectedCardState | null>(null)
+  const [downloadDeleteId, setDownloadDeleteId] = useState('')
 
   async function refreshBaseData() {
     const [settings, serviceOptions, dashboard] = await Promise.all([
@@ -81,7 +89,7 @@ function App() {
     }
     try {
       const hub = await api.getHub(page)
-      setHubPages((current) => ({ ...current, [page]: hub }))
+      setHubPages((current) => cacheHubPage(current, page, hub))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load this section.')
     } finally {
@@ -143,7 +151,7 @@ function App() {
     void api.getHub(page)
       .then((hub) => {
         if (cancelled) return
-        setHubPages((current) => ({ ...current, [page]: hub }))
+        setHubPages((current) => cacheHubPage(current, page, hub))
       })
       .catch((loadError) => {
         if (cancelled) return
@@ -278,6 +286,22 @@ function App() {
     }
   }
 
+  async function handleDeleteDownload(id: string) {
+    setDownloadDeleteId(id)
+    setError('')
+    setNotice('')
+    try {
+      await api.deleteDownload({ id })
+      const nextDownloads = await api.getDownloads()
+      setDownloads(nextDownloads)
+      setNotice('Download removed from the queue.')
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Failed to remove the download.')
+    } finally {
+      setDownloadDeleteId('')
+    }
+  }
+
   function updateConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
     setConfig((current) => ({
       ...current,
@@ -359,7 +383,7 @@ function App() {
               {error ? <p className="error-banner">{error}</p> : null}
             </div>
 
-            {route === 'downloads' ? <DownloadsPage downloads={downloads} /> : null}
+            {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} downloads={downloads} onDelete={handleDeleteDownload} /> : null}
             {route === 'settings' ? (
               <SettingsView
                 busy={busy}
@@ -377,7 +401,7 @@ function App() {
                 busy={busy}
                 hub={currentHub}
                 loading={hubLoading}
-                onOpenCard={setSelectedCard}
+                onOpenCard={(card, originRect) => setSelectedCard({ card, originRect })}
                 onRequest={handleRequest}
                 route={route}
                 tmdbToken={config.tmdb.bearerToken}
@@ -389,9 +413,10 @@ function App() {
 
       {selectedCard ? (
         <TitleDetailsModal
-          card={selectedCard}
+          card={selectedCard.card}
           config={config}
           onClose={() => setSelectedCard(null)}
+          originRect={selectedCard.originRect}
           onRequest={handleRequest}
         />
       ) : null}
@@ -533,7 +558,7 @@ function AuthScreen({
           <ul className="feature-list">
             <li>Server-side session auth</li>
             <li>Encrypted persisted settings</li>
-            <li>Jellyfin, Sonarr, Radarr and qBittorrent</li>
+            <li>Jellyfin, Sonarr and Radarr</li>
             <li>Rebuilt React UI with Reiverr layout</li>
           </ul>
         </div>
@@ -640,7 +665,7 @@ function HubPageView(props: {
   hub?: HubPageResponse
   loading: boolean
   onRequest: (card: MediaCard) => Promise<void>
-  onOpenCard: (card: MediaCard) => void
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
   busy: boolean
   tmdbToken: string
 }) {
@@ -683,9 +708,10 @@ function HubPageView(props: {
   )
 }
 
-function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOpenCard: (card: MediaCard) => void; tmdbToken: string }) {
+function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void; tmdbToken: string }) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [activeLogoUrl, setActiveLogoUrl] = useState('')
+  const logoCacheRef = useRef(new Map<string, string>())
 
   useEffect(() => {
     setActiveIndex((current) => (hero.length ? Math.min(current, hero.length - 1) : 0))
@@ -718,6 +744,12 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
     }
 
     let cancelled = false
+    const cacheKey = `${mediaType}:${featured.tmdbId}`
+    const cachedLogoUrl = logoCacheRef.current.get(cacheKey)
+    if (cachedLogoUrl !== undefined) {
+      setActiveLogoUrl(cachedLogoUrl)
+      return
+    }
 
     const fetchImages = tmdbToken
       ? fetch(`https://api.themoviedb.org/3/${mediaType}/${featured.tmdbId}/images`, {
@@ -742,11 +774,14 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
         if (!cancelled) {
           const englishLogos = payload.logos?.filter((logo) => logo.iso_639_1 === 'en') || []
           const logo = englishLogos[0] || payload.logos?.[0]
-          setActiveLogoUrl(logo?.file_path ? `https://image.tmdb.org/t/p/original${logo.file_path}` : '')
+          const nextLogoUrl = logo?.file_path ? `https://image.tmdb.org/t/p/original${logo.file_path}` : ''
+          logoCacheRef.current.set(cacheKey, nextLogoUrl)
+          setActiveLogoUrl(nextLogoUrl)
         }
       })
       .catch(() => {
         if (!cancelled) {
+          logoCacheRef.current.set(cacheKey, '')
           setActiveLogoUrl('')
         }
       })
@@ -825,10 +860,28 @@ function resolveHeroSlideStyle(card: MediaCard | undefined) {
   return slideImage ? { backgroundImage: `url("${slideImage}")` } : undefined
 }
 
+function cacheHubPage(
+  current: Partial<Record<HubPageResponse['page'], HubPageResponse>>,
+  page: HubPageResponse['page'],
+  hub: HubPageResponse
+): Partial<Record<HubPageResponse['page'], HubPageResponse>> {
+  const next = { ...current, [page]: hub }
+  const pages = Object.keys(next) as HubPageResponse['page'][]
+  if (pages.length <= MAX_CACHED_HUB_PAGES) {
+    return next
+  }
+
+  const trimmed: Partial<Record<HubPageResponse['page'], HubPageResponse>> = {}
+  pages.slice(-MAX_CACHED_HUB_PAGES).forEach((cachedPage) => {
+    trimmed[cachedPage] = next[cachedPage]
+  })
+  return trimmed
+}
+
 function SectionCarousel(props: {
   section: HubPageResponse['sections'][number]
   onRequest: (card: MediaCard) => Promise<void>
-  onOpenCard: (card: MediaCard) => void
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
   busy: boolean
 }) {
   if (!props.section.items.length) return null
@@ -852,7 +905,7 @@ function MediaTile(props: {
   isContinueWatching: boolean
   styleType: 'poster' | 'landscape' | 'profile' | 'genre' | 'network' | 'episode'
   busy: boolean
-  onOpenCard: (card: MediaCard) => void
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
   onRequest: (card: MediaCard) => Promise<void>
 }) {
   const imageUrl = props.styleType === 'landscape' || props.styleType === 'episode'
@@ -861,7 +914,14 @@ function MediaTile(props: {
 
   return (
     <article className={props.isContinueWatching ? `media-tile ${props.styleType} continue-tile` : `media-tile ${props.styleType}`}>
-      <button className="media-art media-trigger" onClick={() => props.onOpenCard(props.card)} type="button">
+      <button
+        className="media-art media-trigger"
+        onClick={(event) => {
+          const tile = event.currentTarget.closest('.media-tile') as HTMLElement | null
+          props.onOpenCard(props.card, tile ? captureOriginRect(tile) : captureOriginRect(event.currentTarget))
+        }}
+        type="button"
+      >
         {imageUrl ? <img alt={props.card.title} loading="lazy" src={imageUrl} /> : <div className="media-fallback" />}
         {props.card.hoverLabel ? <div className="media-hover-label">{props.card.hoverLabel}</div> : null}
         {props.card.progress ? <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${props.card.progress}%` }} /></div> : null}
@@ -874,59 +934,479 @@ function TitleDetailsModal(props: {
   card: MediaCard
   config: AppConfig
   onClose: () => void
+  originRect: ModalOriginRect | null
   onRequest: (card: MediaCard) => Promise<void>
 }) {
-  const canPlay = Boolean(props.card.providerId && props.config.jellyfin.baseUrl)
+  const [details, setDetails] = useState<TitleDetailsResponse | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(true)
+  const [detailsError, setDetailsError] = useState('')
+  const [requestedSeasonId, setRequestedSeasonId] = useState<string | undefined>(undefined)
+  const [activeSeasonId, setActiveSeasonId] = useState<string | undefined>(undefined)
+  const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
+  const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
+  const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
+  const [transitionState, setTransitionState] = useState<'opening' | 'open' | 'closing'>(
+    props.originRect ? 'opening' : 'open'
+  )
+  const [transitionStyle, setTransitionStyle] = useState<CSSProperties | undefined>(undefined)
+  const closeTimeoutRef = useRef<number | null>(null)
+  const modalRef = useRef<HTMLDivElement | null>(null)
+  const episodeListRef = useRef<HTMLDivElement | null>(null)
+  const seasonDetailsCacheRef = useRef(new Map<string, TitleDetailsResponse>())
+  const pendingSeasonScrollRef = useRef<string | null>(null)
+
+  useLayoutEffect(() => {
+    if (!props.originRect || !modalRef.current) {
+      setTransitionState('open')
+      setTransitionStyle(undefined)
+      return
+    }
+
+    const modalRect = modalRef.current.getBoundingClientRect()
+    const scaleX = props.originRect.width / modalRect.width
+    const scaleY = props.originRect.height / modalRect.height
+    const translateX = props.originRect.left - modalRect.left
+    const translateY = props.originRect.top - modalRect.top
+
+    setTransitionStyle({
+      ['--title-modal-from-x' as '--title-modal-from-x']: `${translateX}px`,
+      ['--title-modal-from-y' as '--title-modal-from-y']: `${translateY}px`,
+      ['--title-modal-from-scale-x' as '--title-modal-from-scale-x']: `${scaleX}`,
+      ['--title-modal-from-scale-y' as '--title-modal-from-scale-y']: `${scaleY}`,
+    })
+
+    let frameA = 0
+    let frameB = 0
+    frameA = window.requestAnimationFrame(() => {
+      frameB = window.requestAnimationFrame(() => {
+        setTransitionState('open')
+      })
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frameA)
+      window.cancelAnimationFrame(frameB)
+    }
+  }, [props.card.id, props.originRect])
+
+  useEffect(() => () => {
+    if (closeTimeoutRef.current) {
+      window.clearTimeout(closeTimeoutRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    setDetails(null)
+    setDetailsLoading(true)
+    setDetailsError('')
+    setRequestedSeasonId(undefined)
+    setActiveSeasonId(undefined)
+    setPlayerTarget(null)
+    setIsOverviewExpanded(false)
+    seasonDetailsCacheRef.current.clear()
+  }, [props.card.id])
+
+  useEffect(() => {
+    let cancelled = false
+    const cacheKey = requestedSeasonId || '__default__'
+    const cachedDetails = seasonDetailsCacheRef.current.get(cacheKey)
+
+    if (cachedDetails) {
+      setDetails(cachedDetails)
+      setDetailsLoading(false)
+      setDetailsError('')
+      if (cachedDetails.selectedSeasonId) {
+        setActiveSeasonId((current) => current || cachedDetails.selectedSeasonId)
+      }
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setDetailsLoading(true)
+    setDetailsError('')
+
+    void api.getTitleDetails(props.card, requestedSeasonId)
+      .then((nextDetails) => {
+        if (cancelled) return
+        const resolvedSeasonId = nextDetails.selectedSeasonId || requestedSeasonId || undefined
+        seasonDetailsCacheRef.current.set(cacheKey, nextDetails)
+        if (resolvedSeasonId) {
+          seasonDetailsCacheRef.current.set(resolvedSeasonId, nextDetails)
+          setActiveSeasonId((current) => current || resolvedSeasonId)
+        }
+        setDetails(nextDetails)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setDetailsError(error instanceof Error ? error.message : 'Failed to load title details.')
+      })
+      .finally(() => {
+        if (cancelled) return
+        setDetailsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [props.card, requestedSeasonId])
+
+  const seasonValue = activeSeasonId ?? requestedSeasonId ?? details?.selectedSeasonId ?? ''
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series' || !details.seasons.length) {
+      return
+    }
+
+    const currentIndex = details.seasons.findIndex((season) => season.id === seasonValue)
+    const neighborSeasonIds = [details.seasons[currentIndex - 1]?.id, details.seasons[currentIndex + 1]?.id].filter(Boolean) as string[]
+
+    for (const seasonId of neighborSeasonIds) {
+      if (seasonDetailsCacheRef.current.has(seasonId)) {
+        continue
+      }
+
+      void api.getTitleDetails(props.card, seasonId)
+        .then((nextDetails) => {
+          seasonDetailsCacheRef.current.set(seasonId, nextDetails)
+        })
+        .catch(() => {})
+    }
+  }, [details, props.card, seasonValue])
+
+  useEffect(() => {
+    const list = episodeListRef.current
+    const targetSeasonId = pendingSeasonScrollRef.current
+    if (!list || !targetSeasonId) {
+      return
+    }
+
+    const targetEpisode = list.querySelector<HTMLElement>(`[data-season-id="${CSS.escape(targetSeasonId)}"]`)
+    if (!targetEpisode) {
+      return
+    }
+
+    const listRect = list.getBoundingClientRect()
+    const targetRect = targetEpisode.getBoundingClientRect()
+    list.scrollTo({
+      left: list.scrollLeft + (targetRect.left - listRect.left),
+      behavior: 'smooth',
+    })
+    pendingSeasonScrollRef.current = null
+  }, [seasonValue, details])
+
+  useEffect(() => {
+    const list = episodeListRef.current
+    if (!list || detailsLoading || details?.mediaType !== 'series') {
+      setEpisodeScrollState({ canScrollLeft: false, canScrollRight: false })
+      return
+    }
+
+    const syncScrollState = () => {
+      const maxScrollLeft = list.scrollWidth - list.clientWidth
+      setEpisodeScrollState({
+        canScrollLeft: list.scrollLeft > 8,
+        canScrollRight: maxScrollLeft - list.scrollLeft > 8,
+      })
+
+       const viewportLeft = list.scrollLeft
+       const viewportRight = viewportLeft + list.clientWidth
+       const coverageBySeason = new Map<string, number>()
+       const cards = list.querySelectorAll<HTMLElement>('[data-season-id]')
+
+       for (const card of cards) {
+         const seasonId = card.dataset.seasonId
+         if (!seasonId) continue
+
+         const cardLeft = card.offsetLeft
+         const cardRight = cardLeft + card.offsetWidth
+         const visibleWidth = Math.min(cardRight, viewportRight) - Math.max(cardLeft, viewportLeft)
+
+         if (visibleWidth <= 0) continue
+
+         coverageBySeason.set(seasonId, (coverageBySeason.get(seasonId) || 0) + visibleWidth)
+       }
+
+       let dominantSeasonId = seasonValue
+       let dominantCoverage = -1
+       for (const [seasonId, coverage] of coverageBySeason.entries()) {
+         if (coverage > dominantCoverage) {
+           dominantCoverage = coverage
+           dominantSeasonId = seasonId
+         }
+       }
+
+       if (dominantSeasonId && dominantSeasonId !== activeSeasonId) {
+         setActiveSeasonId(dominantSeasonId)
+       }
+    }
+
+    syncScrollState()
+    list.addEventListener('scroll', syncScrollState, { passive: true })
+    window.addEventListener('resize', syncScrollState)
+
+    return () => {
+      list.removeEventListener('scroll', syncScrollState)
+      window.removeEventListener('resize', syncScrollState)
+    }
+  }, [activeSeasonId, details, detailsLoading, seasonValue])
+
   const canRequest = Boolean(props.card.tmdbId && props.card.mediaType !== 'mixed')
-  const backgroundImage = props.card.backdropUrl || props.card.posterUrl
-  const [playerOpen, setPlayerOpen] = useState(false)
-  const requestLabel = props.card.mediaType === 'movie' ? 'Add to Radarr' : 'Add to Sonarr'
-  const jellyfinPlayerUrl = canPlay
-    ? `${props.config.jellyfin.baseUrl.replace(/\/$/, '')}/web/#/details?id=${encodeURIComponent(props.card.providerId!)}&autoplay=true`
+  const playId = details?.playTargetId || details?.providerId || props.card.providerId
+  const isAvailableInJellyfin = details?.availableInJellyfin ?? Boolean(props.card.providerId)
+  const canPlay = Boolean(isAvailableInJellyfin && playId && props.config.jellyfin.baseUrl)
+  const backgroundImage = details?.backdropUrl || props.card.backdropUrl || props.card.posterUrl
+  const logoUrl = details?.logoUrl || props.card.logoUrl
+  const displayTitle = details?.title || props.card.title
+  const displaySubtitle = details?.subtitle || props.card.subtitle
+  const displayOverview = details?.overview || props.card.overview || 'No details available yet.'
+  const displayYear = props.card.releaseDate?.slice(0, 4)
+    || props.card.firstAirDate?.slice(0, 4)
+    || displaySubtitle.match(/\b(19|20)\d{2}\b/)?.[0]
+    || ''
+  const truncatedOverview = truncateOverview(displayOverview, 260)
+  const shouldShowOverviewToggle = truncatedOverview !== displayOverview
+  const jellyfinPlayerUrl = playerTarget && props.config.jellyfin.baseUrl
+    ? buildJellyfinPlayerUrl(props.config.jellyfin.baseUrl, playerTarget.id)
     : ''
+  const activeSeasonDetails = seasonValue ? seasonDetailsCacheRef.current.get(seasonValue) : null
+  const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
+  const resolvedSeasonIndex = currentSeasonIndex >= 0 ? currentSeasonIndex : 0
+  const hasPreviousSeason = Boolean(details?.seasons.length && resolvedSeasonIndex > 0)
+  const hasNextSeason = Boolean(details?.seasons.length && resolvedSeasonIndex < details.seasons.length - 1)
+  const visibleEpisodes = details?.seasons.flatMap((season) =>
+    (seasonDetailsCacheRef.current.get(season.id)?.episodes || []).map((episode) => ({
+      ...episode,
+      seasonId: season.id,
+    }))
+  ) ?? []
+
+  function handleRequestClose() {
+    if (!props.originRect || transitionState === 'closing') {
+      props.onClose()
+      return
+    }
+
+    setTransitionState('closing')
+    closeTimeoutRef.current = window.setTimeout(() => {
+      props.onClose()
+    }, 680)
+  }
+
+  function scrollEpisodes(direction: 'left' | 'right') {
+    const list = episodeListRef.current
+    if (!list) return
+
+    const distance = Math.max(list.clientWidth * 0.72, 320)
+    list.scrollBy({
+      left: direction === 'left' ? -distance : distance,
+      behavior: 'smooth',
+    })
+  }
+
+  function changeSeason(offset: -1 | 1) {
+    if (!details?.seasons.length) {
+      return
+    }
+
+    const nextSeason = details.seasons[resolvedSeasonIndex + offset]
+    if (!nextSeason) {
+      return
+    }
+    pendingSeasonScrollRef.current = nextSeason.id
+    setActiveSeasonId(nextSeason.id)
+    startTransition(() => {
+      setRequestedSeasonId(nextSeason.id)
+    })
+  }
+
+  function handleSeasonSelectChange(nextSeasonId: string) {
+    pendingSeasonScrollRef.current = nextSeasonId || null
+    setActiveSeasonId(nextSeasonId || undefined)
+    startTransition(() => {
+      setRequestedSeasonId(nextSeasonId || undefined)
+    })
+  }
+
+  if (playerTarget && jellyfinPlayerUrl) {
+    return (
+      <div className="modal-backdrop player-backdrop" role="presentation">
+        <div className="title-player-view" role="dialog" aria-modal="true">
+          <div className="title-player-topbar">
+            <button className="secondary-button" onClick={() => setPlayerTarget(null)} type="button">Back</button>
+            <button className="modal-close reiverr-modal-close" onClick={props.onClose} type="button">Close</button>
+          </div>
+          <iframe
+            allow="autoplay; fullscreen; encrypted-media"
+            className="title-player-frame"
+            src={jellyfinPlayerUrl}
+            title={`${playerTarget.title} player`}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="modal-backdrop" onClick={props.onClose} role="presentation">
-      <div className="title-modal reiverr-title-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="title-modal-hero reiverr-title-hero" style={backgroundImage ? { backgroundImage: `url("${backgroundImage}")` } : undefined}>
-          <div className="reiverr-title-darken" />
-          <button className="modal-close reiverr-modal-close" onClick={props.onClose} type="button">Close</button>
-          <div className="reiverr-title-top">
-            <div className="reiverr-title-shell">
-              <div className="reiverr-title-copy">
-                <span className="badge">{props.card.badge || props.card.subtitle || 'Title'}</span>
-                <h2>{props.card.title}</h2>
-                {props.card.subtitle ? <p className="reiverr-title-subtitle">{props.card.subtitle}</p> : null}
-                <div className="title-modal-actions reiverr-title-actions">
-                  {canPlay ? <button className="primary-button" onClick={() => setPlayerOpen(true)} type="button">Play</button> : null}
-                  {canRequest ? <button className="secondary-button" onClick={() => void props.onRequest(props.card)} type="button">{props.card.actionLabel || requestLabel}</button> : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        {playerOpen && jellyfinPlayerUrl ? (
-          <div className="reiverr-player-shell">
-            <iframe
-              allow="autoplay; fullscreen; encrypted-media"
-              className="reiverr-player-frame"
-              src={jellyfinPlayerUrl}
-              title={`${props.card.title} player`}
-            />
+    <div className={transitionState === 'closing' ? 'modal-backdrop is-closing' : 'modal-backdrop'} onClick={handleRequestClose} role="presentation">
+      <div
+        className={
+          transitionStyle
+            ? `title-modal title-details-modal title-details-modal-transition is-${transitionState}`
+            : 'title-modal title-details-modal'
+        }
+        onClick={(event) => event.stopPropagation()}
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        style={transitionStyle}
+      >
+        {detailsLoading && !details ? (
+          <div className="title-details-loading-screen" role="status" aria-live="polite">
+            <div className="title-details-spinner" aria-hidden="true" />
+            <p>Loading details…</p>
           </div>
         ) : null}
-        <div className="reiverr-title-bottom">
-          <div className="reiverr-title-shell reiverr-title-bottom-grid">
-            <div className="title-modal-poster reiverr-title-poster">
-              {props.card.posterUrl ? <img alt={props.card.title} src={props.card.posterUrl} /> : <div className="media-fallback" />}
-            </div>
-            <div className="reiverr-title-info">
-              <h3>{props.card.title}</h3>
-              <p>{props.card.overview || props.card.subtitle || 'No details available yet.'}</p>
-              <div className="title-modal-meta">
-                {props.card.subtitle ? <span>{props.card.subtitle}</span> : null}
-                {props.card.secondaryValue ? <span>{props.card.secondaryValue}</span> : null}
+        <div className="title-details-modal-content">
+          <div className="title-details-hero" style={backgroundImage ? { backgroundImage: `url("${backgroundImage}")` } : undefined}>
+            <div className="title-details-darken" />
+            <button className="modal-close reiverr-modal-close" onClick={handleRequestClose} type="button">Close</button>
+          </div>
+
+          <div className="title-details-body">
+            <div className="title-details-shell">
+              {detailsError ? <p className="error-banner">{detailsError}</p> : null}
+              <div className="title-details-summary">
+                <div className="title-details-hero-heading">
+                  {logoUrl ? (
+                    <img alt={displayTitle} className="title-details-logo" src={logoUrl} />
+                  ) : (
+                    <h2 className="title-details-title">{displayTitle}</h2>
+                  )}
+                </div>
+                <div className="title-details-summary-content">
+                  <p className="title-details-overview">
+                    {isOverviewExpanded ? displayOverview : truncatedOverview}
+                    {shouldShowOverviewToggle ? (
+                      <>
+                        {' '}
+                        <button
+                          className="title-details-overview-toggle"
+                          onClick={() => setIsOverviewExpanded((current) => !current)}
+                          type="button"
+                        >
+                          {isOverviewExpanded ? 'less' : 'more'}
+                        </button>
+                      </>
+                    ) : null}
+                  </p>
+                  <div className="title-details-summary-header">
+                    {canPlay ? (
+                      <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: displayTitle })} type="button">
+                        <PlayGlyph />
+                        <span>Play</span>
+                      </button>
+                    ) : canRequest ? (
+                      <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
+                        <DownloadGlyph />
+                        <span>Request</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {displayYear ? <p className="title-details-year">{displayYear}</p> : null}
               </div>
+              {details?.mediaType === 'series' ? (
+                <div className="title-seasons-panel">
+                  <div className="title-seasons-header">
+                    <div
+                      className="title-season-strip"
+                    >
+                      <button
+                        aria-label="Previous season"
+                        className="title-season-nav"
+                        disabled={!hasPreviousSeason}
+                        onClick={() => changeSeason(-1)}
+                        type="button"
+                      />
+                      {details.seasons.length ? (
+                        <label className="title-season-selector">
+                          <span className="title-season-kicker">Season</span>
+                          <select
+                            className="title-season-select"
+                            onChange={(event) => handleSeasonSelectChange(event.target.value)}
+                            value={seasonValue}
+                          >
+                            {details.seasons.map((season) => (
+                              <option key={season.id} value={season.id}>
+                                {season.title}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <div className="title-season-divider" aria-hidden="true" />
+                      <div className="title-season-badge">
+                        <strong>{activeSeasonDetails?.episodes.length ?? details.episodes.length}</strong>
+                        <span>{(activeSeasonDetails?.episodes.length ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
+                      </div>
+                      <button
+                        aria-label="Next season"
+                        className="title-season-nav next"
+                        disabled={!hasNextSeason}
+                        onClick={() => changeSeason(1)}
+                        type="button"
+                      />
+                    </div>
+                  </div>
+                    <div
+                      className={[
+                        'episode-dock',
+                        episodeScrollState.canScrollLeft ? 'show-left-fade' : '',
+                        episodeScrollState.canScrollRight ? 'show-right-fade' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                    {episodeScrollState.canScrollLeft ? (
+                      <button
+                        aria-label="Scroll episodes left"
+                        className="episode-dock-arrow left"
+                        onClick={() => scrollEpisodes('left')}
+                        type="button"
+                      />
+                    ) : null}
+                    {episodeScrollState.canScrollRight ? (
+                      <button
+                        aria-label="Scroll episodes right"
+                        className="episode-dock-arrow right"
+                        onClick={() => scrollEpisodes('right')}
+                        type="button"
+                      />
+                    ) : null}
+                    <div
+                      className="episode-list"
+                      ref={episodeListRef}
+                    >
+                      {visibleEpisodes.map((episode) => (
+                        <button
+                          className="episode-card"
+                          data-season-id={episode.seasonId}
+                          key={`${episode.seasonId}-${episode.id}`}
+                          onClick={() => setPlayerTarget({ id: episode.id, title: episode.title })}
+                          type="button"
+                        >
+                          <div className="episode-card-art">
+                            {episode.imageUrl ? <img alt={episode.title} loading="lazy" src={episode.imageUrl} /> : <div className="media-fallback" />}
+                          </div>
+                          <div className="episode-card-copy">
+                            <strong>{episode.title}</strong>
+                            <span>{formatEpisodeMeta(episode.subtitle)}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -935,34 +1415,139 @@ function TitleDetailsModal(props: {
   )
 }
 
-function DownloadsPage({ downloads }: { downloads: DownloadItem[] }) {
+function buildJellyfinPlayerUrl(baseUrl: string, itemId: string) {
+  return `${baseUrl.replace(/\/$/, '')}/web/#/details?id=${encodeURIComponent(itemId)}&autoplay=true`
+}
+
+function captureOriginRect(element: HTMLElement): ModalOriginRect {
+  const rect = element.getBoundingClientRect()
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
+function PlayGlyph() {
+  return (
+    <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
+      <path d="M5 3.2v9.6L12.6 8 5 3.2Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function DownloadGlyph() {
+  return (
+    <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
+      <path d="M8.75 2.5h-1.5v6.1L5.1 6.45 4 7.55 8 11.55l4-4-1.1-1.1-2.15 2.15V2.5Z" fill="currentColor" />
+      <path d="M3 12h10v1.5H3z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function formatEpisodeMeta(subtitle: string) {
+  return subtitle.replace(/^Season\s+\d+\s*,\s*/i, '')
+}
+
+function truncateOverview(text: string, maxLength: number) {
+  if (text.length <= maxLength) {
+    return text
+  }
+
+  const clipped = text.slice(0, maxLength)
+  const safeBreak = clipped.lastIndexOf(' ')
+  return `${(safeBreak > maxLength * 0.7 ? clipped.slice(0, safeBreak) : clipped).trimEnd()}...`
+}
+
+function DownloadsPage(props: {
+  downloads: DownloadItem[]
+  busyId: string
+  onDelete: (id: string) => Promise<void>
+}) {
   return (
     <div className="downloads-page">
-      <section className="carousel-section">
-        <div className="carousel-title">Downloads</div>
+      <div className="downloads-header">
+        <h2>Downloads</h2>
+      </div>
+      <section className="downloads-section">
         <div className="downloads-grid">
-          {downloads.length ? downloads.map((item) => <DownloadRow item={item} key={item.id} />) : <EmptyState copy="The queue will appear here as soon as your services start working." title="No active downloads" />}
+          {props.downloads.length
+            ? props.downloads.map((item) => (
+                <DownloadRow
+                  busy={props.busyId === item.id}
+                  item={item}
+                  key={item.id}
+                  onDelete={props.onDelete}
+                />
+              ))
+            : <EmptyState copy="The queue will appear here as soon as your services start working." title="No active downloads" />}
         </div>
       </section>
     </div>
   )
 }
 
-function DownloadRow({ item }: { item: DownloadItem }) {
+function DownloadRow(props: {
+  item: DownloadItem
+  busy: boolean
+  onDelete: (id: string) => Promise<void>
+}) {
+  const item = props.item
+  const progressMeta = [item.size, item.speed, item.eta].filter(Boolean).join(' · ')
+  const artwork = item.backdropUrl || item.posterUrl
+  const isCompleted = item.progress >= 100
+
+  function confirmDelete() {
+    if (!window.confirm(`Remove "${item.title}" from the queue?`)) {
+      return
+    }
+    void props.onDelete(item.id)
+  }
+
   return (
     <article className="download-row">
-      <div>
-        <p className="download-source">{item.source}</p>
-        <h4>{item.title}</h4>
-        <p className="download-detail">{item.detail}</p>
+      <div className="download-card">
+        <div className="download-artwork">
+          {artwork ? <img alt={item.title} loading="lazy" src={artwork} /> : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
+        </div>
+        <div className="download-copy">
+          <h4>{item.title}</h4>
+          <p className="download-subtitle">{item.subtitle || item.detail}</p>
+          <p className="download-detail">{progressMeta || humanizeDownloadState(item.state)}</p>
+        </div>
       </div>
-      <div className="download-meta">
-        <strong>{item.progress}%</strong>
-        <p>{[item.size, item.speed, item.eta].filter(Boolean).join(' · ')}</p>
-        <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${item.progress}%` }} /></div>
+
+      <div className="download-side">
+        <div className="download-progress-panel">
+          <div className="download-progress-header">
+            <strong>{item.progress}%</strong>
+            <span>{progressMeta || humanizeDownloadState(item.state)}</span>
+          </div>
+          <div className="download-progress-row">
+            <div className={isCompleted ? 'download-progress-bar download-progress-complete' : 'download-progress-bar'}>
+              <div className="download-progress-fill" style={{ width: `${item.progress}%` }} />
+            </div>
+            <button
+              aria-label={`Delete ${item.title}`}
+              className="download-delete-button"
+              disabled={props.busy}
+              onClick={confirmDelete}
+              type="button"
+            >
+              {props.busy ? '…' : '×'}
+            </button>
+          </div>
+        </div>
       </div>
     </article>
   )
+}
+
+function humanizeDownloadState(state: string) {
+  return state
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
 function SettingsView(props: {
@@ -1039,21 +1624,6 @@ function SettingsView(props: {
           onApiKeyChange={(apiKey) => props.updateConfig('radarr', { ...props.config.radarr, apiKey })}
           onBaseUrlChange={(baseUrl) => props.updateConfig('radarr', { ...props.config.radarr, baseUrl })}
         />
-      </SettingsCard>
-
-      <SettingsCard title="qBittorrent">
-        <label>
-          Base URL
-          <input className="input" onChange={(event) => props.updateConfig('qbittorrent', { ...props.config.qbittorrent, baseUrl: event.target.value })} value={props.config.qbittorrent.baseUrl} />
-        </label>
-        <label>
-          Username
-          <input className="input" onChange={(event) => props.updateConfig('qbittorrent', { ...props.config.qbittorrent, username: event.target.value })} value={props.config.qbittorrent.username} />
-        </label>
-        <label>
-          Password
-          <input className="input" onChange={(event) => props.updateConfig('qbittorrent', { ...props.config.qbittorrent, password: event.target.value })} type="password" value={props.config.qbittorrent.password} />
-        </label>
       </SettingsCard>
 
       <SettingsCard title="TMDb">

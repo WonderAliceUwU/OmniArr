@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { defaultConfig, type AppConfig, type AuthPayload } from '../shared/contracts.js';
+import { defaultConfig, type AppConfig, type AuthPayload, type TitleDetailsRequest } from '../shared/contracts.js';
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
 import { loadState, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
 import {
@@ -9,10 +9,12 @@ import {
   getDashboard,
   getDownloads,
   getHubPage,
+  getTitleDetails,
   getTmdbLogos,
   getServiceOptions,
   loadJellyfinUsers,
   proxyJellyfinImage,
+  removeDownload,
   requestMovie,
   requestSeries,
   sanitizeConfig
@@ -215,6 +217,21 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     return;
   }
 
+  if (url.pathname === '/api/title-details' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<TitleDetailsRequest>(request);
+    sendJson(response, 200, await getTitleDetails(config, body));
+    return;
+  }
+
+  if (url.pathname === '/api/downloads/delete' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<{ id: string }>(request);
+    await removeDownload(config, String(body.id || ''));
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   if (url.pathname === '/api/requests/movie' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<{ tmdbId: number }>(request);
@@ -358,10 +375,6 @@ async function readConfig(encryptionKey: Buffer): Promise<AppConfig> {
     radarr: {
       ...defaultConfig.radarr,
       ...(stored.radarr || {})
-    },
-    qbittorrent: {
-      ...defaultConfig.qbittorrent,
-      ...(stored.qbittorrent || {})
     },
     tmdb: {
       ...defaultConfig.tmdb,

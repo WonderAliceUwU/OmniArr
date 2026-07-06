@@ -38,11 +38,6 @@ export interface RadarrConfig extends ServiceConfig {
   startSearch: boolean;
 }
 
-export interface QbittorrentConfig extends ServiceConfig {
-  username: string;
-  password: string;
-}
-
 export interface TmdbConfig {
   bearerToken: string;
 }
@@ -59,7 +54,6 @@ export interface AppConfig {
   jellyfin: JellyfinConfig;
   sonarr: SonarrConfig;
   radarr: RadarrConfig;
-  qbittorrent: QbittorrentConfig;
   tmdb: TmdbConfig;
 }
 
@@ -78,7 +72,7 @@ export interface ServiceOptionsResponse {
 }
 
 export interface ConnectionStatus {
-  key: 'jellyfin' | 'sonarr' | 'radarr' | 'qbittorrent' | 'tmdb';
+  key: 'jellyfin' | 'sonarr' | 'radarr' | 'tmdb';
   label: string;
   ok: boolean;
   message: string;
@@ -113,16 +107,57 @@ export interface MediaCard {
   genreIds?: number[];
 }
 
+export interface TitleDetailsEpisode {
+  id: string;
+  title: string;
+  overview: string;
+  subtitle: string;
+  imageUrl: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  runtimeMinutes?: number;
+}
+
+export interface TitleDetailsSeason {
+  id: string;
+  title: string;
+  seasonNumber?: number;
+  episodeCount?: number;
+}
+
+export interface TitleDetailsResponse {
+  id: string;
+  tmdbId?: number;
+  providerId?: string;
+  playTargetId?: string;
+  availableInJellyfin: boolean;
+  title: string;
+  overview: string;
+  subtitle: string;
+  mediaType: 'movie' | 'series';
+  posterUrl: string;
+  backdropUrl: string;
+  logoUrl?: string;
+  selectedSeasonId?: string;
+  seasons: TitleDetailsSeason[];
+  episodes: TitleDetailsEpisode[];
+}
+
 export interface DownloadItem {
   id: string;
-  source: 'sonarr' | 'radarr' | 'qbittorrent';
+  source: 'sonarr' | 'radarr';
   title: string;
   detail: string;
   progress: number;
   state: string;
+  subtitle?: string;
   speed?: string;
   eta?: string;
   size?: string;
+  posterUrl?: string;
+  backdropUrl?: string;
+  tmdbId?: number;
+  mediaType?: 'movie' | 'tv' | 'series';
 }
 
 export interface DashboardResponse {
@@ -133,6 +168,11 @@ export interface DashboardResponse {
   recommendations: MediaCard[];
   trendingSeries: MediaCard[];
   downloads: DownloadItem[];
+}
+
+export interface TitleDetailsRequest {
+  card: MediaCard;
+  seasonId?: string;
 }
 
 export interface HubSection {
@@ -196,11 +236,6 @@ export const defaultConfig: AppConfig = {
     qualityProfileId: 0,
     monitor: 'movieOnly',
     startSearch: false
-  },
-  qbittorrent: {
-    baseUrl: '',
-    username: '',
-    password: ''
   },
   tmdb: {
     bearerToken: ''
