@@ -1503,6 +1503,34 @@ img {
   transform: translate(-65%, -50%) rotate(45deg);
 }
 
+.episode-dock-spinner {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: -0.575rem;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  pointer-events: none;
+  animation: episodeDockSpinner 720ms linear infinite;
+}
+
+.episode-dock-spinner.left {
+  left: 2.8rem;
+}
+
+.episode-dock-spinner.right {
+  right: 2.8rem;
+}
+
+@keyframes episodeDockSpinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .episode-card:hover,
 .episode-card:focus-visible {
   transform: translateY(-0.22rem);
@@ -2118,6 +2146,14 @@ img {
 
   .episode-dock-arrow.right {
     right: 0.5rem;
+  }
+
+  .episode-dock-spinner.left {
+    left: 2.1rem;
+  }
+
+  .episode-dock-spinner.right {
+    right: 2.1rem;
   }
 
   .episode-card {

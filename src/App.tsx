@@ -942,6 +942,8 @@ function TitleDetailsModal(props: {
   const [detailsError, setDetailsError] = useState('')
   const [requestedSeasonId, setRequestedSeasonId] = useState<string | undefined>(undefined)
   const [activeSeasonId, setActiveSeasonId] = useState<string | undefined>(undefined)
+  const [seasonCacheVersion, setSeasonCacheVersion] = useState(0)
+  const [loadingSeasonIds, setLoadingSeasonIds] = useState<string[]>([])
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
   const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
@@ -953,7 +955,9 @@ function TitleDetailsModal(props: {
   const modalRef = useRef<HTMLDivElement | null>(null)
   const episodeListRef = useRef<HTMLDivElement | null>(null)
   const seasonDetailsCacheRef = useRef(new Map<string, TitleDetailsResponse>())
+  const seasonRequestsRef = useRef(new Map<string, Promise<TitleDetailsResponse>>())
   const pendingSeasonScrollRef = useRef<string | null>(null)
+  const previousRenderedSeasonIdsRef = useRef<string[]>([])
 
   useLayoutEffect(() => {
     if (!props.originRect || !modalRef.current) {
@@ -1001,22 +1005,68 @@ function TitleDetailsModal(props: {
     setDetailsError('')
     setRequestedSeasonId(undefined)
     setActiveSeasonId(undefined)
+    setSeasonCacheVersion(0)
+    setLoadingSeasonIds([])
     setPlayerTarget(null)
     setIsOverviewExpanded(false)
     seasonDetailsCacheRef.current.clear()
+    seasonRequestsRef.current.clear()
+    pendingSeasonScrollRef.current = null
+    previousRenderedSeasonIdsRef.current = []
   }, [props.card.id])
+
+  function cacheSeasonDetails(nextDetails: TitleDetailsResponse, requestedSeason?: string) {
+    const resolvedSeasonId = nextDetails.selectedSeasonId || requestedSeason
+    if (requestedSeason) {
+      seasonDetailsCacheRef.current.set(requestedSeason, nextDetails)
+    }
+    if (resolvedSeasonId) {
+      seasonDetailsCacheRef.current.set(resolvedSeasonId, nextDetails)
+    }
+    setSeasonCacheVersion((current) => current + 1)
+    return resolvedSeasonId
+  }
+
+  function ensureSeasonLoaded(seasonId: string) {
+    const cached = seasonDetailsCacheRef.current.get(seasonId)
+    if (cached) {
+      return Promise.resolve(cached)
+    }
+
+    const existingRequest = seasonRequestsRef.current.get(seasonId)
+    if (existingRequest) {
+      return existingRequest
+    }
+
+    setLoadingSeasonIds((current) => current.includes(seasonId) ? current : [...current, seasonId])
+    const request = api.getTitleDetails(props.card, seasonId)
+      .then((nextDetails) => {
+        cacheSeasonDetails(nextDetails, seasonId)
+        return nextDetails
+      })
+      .finally(() => {
+        seasonRequestsRef.current.delete(seasonId)
+        setLoadingSeasonIds((current) => current.filter((id) => id !== seasonId))
+      })
+
+    seasonRequestsRef.current.set(seasonId, request)
+    return request
+  }
 
   useEffect(() => {
     let cancelled = false
     const cacheKey = requestedSeasonId || '__default__'
-    const cachedDetails = seasonDetailsCacheRef.current.get(cacheKey)
+    const cachedDetails = requestedSeasonId
+      ? seasonDetailsCacheRef.current.get(requestedSeasonId)
+      : seasonDetailsCacheRef.current.get(cacheKey)
 
     if (cachedDetails) {
       setDetails(cachedDetails)
       setDetailsLoading(false)
       setDetailsError('')
-      if (cachedDetails.selectedSeasonId) {
-        setActiveSeasonId((current) => current || cachedDetails.selectedSeasonId)
+      const resolvedSeasonId = cachedDetails.selectedSeasonId || requestedSeasonId
+      if (resolvedSeasonId) {
+        setActiveSeasonId(resolvedSeasonId)
       }
       return () => {
         cancelled = true
@@ -1029,11 +1079,10 @@ function TitleDetailsModal(props: {
     void api.getTitleDetails(props.card, requestedSeasonId)
       .then((nextDetails) => {
         if (cancelled) return
-        const resolvedSeasonId = nextDetails.selectedSeasonId || requestedSeasonId || undefined
         seasonDetailsCacheRef.current.set(cacheKey, nextDetails)
+        const resolvedSeasonId = cacheSeasonDetails(nextDetails, requestedSeasonId)
         if (resolvedSeasonId) {
-          seasonDetailsCacheRef.current.set(resolvedSeasonId, nextDetails)
-          setActiveSeasonId((current) => current || resolvedSeasonId)
+          setActiveSeasonId(resolvedSeasonId)
         }
         setDetails(nextDetails)
       })
@@ -1059,20 +1108,46 @@ function TitleDetailsModal(props: {
     }
 
     const currentIndex = details.seasons.findIndex((season) => season.id === seasonValue)
-    const neighborSeasonIds = [details.seasons[currentIndex - 1]?.id, details.seasons[currentIndex + 1]?.id].filter(Boolean) as string[]
-
-    for (const seasonId of neighborSeasonIds) {
-      if (seasonDetailsCacheRef.current.has(seasonId)) {
-        continue
-      }
-
-      void api.getTitleDetails(props.card, seasonId)
-        .then((nextDetails) => {
-          seasonDetailsCacheRef.current.set(seasonId, nextDetails)
-        })
-        .catch(() => {})
+    if (currentIndex < 0) {
+      return
     }
-  }, [details, props.card, seasonValue])
+
+    const keepSeasonIds = new Set(
+      details.seasons
+        .slice(Math.max(0, currentIndex - 2), currentIndex + 3)
+        .map((season) => season.id)
+    )
+
+    for (const seasonId of Array.from(seasonDetailsCacheRef.current.keys())) {
+      if (seasonId !== '__default__' && !keepSeasonIds.has(seasonId)) {
+        seasonDetailsCacheRef.current.delete(seasonId)
+      }
+    }
+  }, [details, seasonCacheVersion, seasonValue])
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series' || !details.seasons.length) {
+      return
+    }
+
+    const activeIndex = details.seasons.findIndex((season) => season.id === seasonValue)
+    if (activeIndex < 0) {
+      return
+    }
+
+    const prioritySeasonIds = [
+      details.seasons[activeIndex + 1]?.id,
+      details.seasons[activeIndex - 1]?.id,
+      details.seasons[activeIndex + 2]?.id,
+      details.seasons[activeIndex - 2]?.id,
+    ].filter(Boolean) as string[]
+
+    for (const seasonId of prioritySeasonIds) {
+      if (!seasonDetailsCacheRef.current.has(seasonId)) {
+        void ensureSeasonLoaded(seasonId)
+      }
+    }
+  }, [details, seasonValue])
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -1093,7 +1168,45 @@ function TitleDetailsModal(props: {
       behavior: 'smooth',
     })
     pendingSeasonScrollRef.current = null
-  }, [seasonValue, details])
+  }, [details, seasonCacheVersion, seasonValue])
+
+  useLayoutEffect(() => {
+    const list = episodeListRef.current
+    if (!list || pendingSeasonScrollRef.current) {
+      return
+    }
+
+    const previousRenderedSeasonIds = previousRenderedSeasonIdsRef.current
+    const currentRenderedSeasonIds = Array.from(new Set(
+      Array.from(list.querySelectorAll<HTMLElement>('[data-season-id]'))
+        .map((card) => card.dataset.seasonId)
+        .filter((seasonId): seasonId is string => Boolean(seasonId))
+    ))
+
+    if (!previousRenderedSeasonIds.length) {
+      previousRenderedSeasonIdsRef.current = currentRenderedSeasonIds
+      return
+    }
+
+    const previousFirstSeasonId = previousRenderedSeasonIds[0]
+    const currentFirstSeasonId = currentRenderedSeasonIds[0]
+
+    if (previousFirstSeasonId && currentFirstSeasonId && previousFirstSeasonId !== currentFirstSeasonId) {
+      if (currentRenderedSeasonIds.includes(previousFirstSeasonId)) {
+        const anchorCard = list.querySelector<HTMLElement>(`[data-season-id="${CSS.escape(previousFirstSeasonId)}"]`)
+        if (anchorCard) {
+          list.scrollLeft += anchorCard.offsetLeft
+        }
+      } else if (previousRenderedSeasonIds.includes(currentFirstSeasonId)) {
+        const currentFirstCard = list.querySelector<HTMLElement>(`[data-season-id="${CSS.escape(currentFirstSeasonId)}"]`)
+        if (currentFirstCard) {
+          list.scrollLeft = Math.max(0, list.scrollLeft - currentFirstCard.offsetLeft)
+        }
+      }
+    }
+
+    previousRenderedSeasonIdsRef.current = currentRenderedSeasonIds
+  }, [details, seasonCacheVersion, seasonValue])
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -1109,36 +1222,70 @@ function TitleDetailsModal(props: {
         canScrollRight: maxScrollLeft - list.scrollLeft > 8,
       })
 
-       const viewportLeft = list.scrollLeft
-       const viewportRight = viewportLeft + list.clientWidth
-       const coverageBySeason = new Map<string, number>()
-       const cards = list.querySelectorAll<HTMLElement>('[data-season-id]')
+      const viewportLeft = list.scrollLeft
+      const viewportRight = viewportLeft + list.clientWidth
+      const coverageBySeason = new Map<string, number>()
+      const boundsBySeason = new Map<string, { left: number; right: number }>()
+      const cards = list.querySelectorAll<HTMLElement>('[data-season-id]')
 
-       for (const card of cards) {
-         const seasonId = card.dataset.seasonId
-         if (!seasonId) continue
+      for (const card of cards) {
+        const seasonId = card.dataset.seasonId
+        if (!seasonId) continue
 
-         const cardLeft = card.offsetLeft
-         const cardRight = cardLeft + card.offsetWidth
-         const visibleWidth = Math.min(cardRight, viewportRight) - Math.max(cardLeft, viewportLeft)
+        const cardLeft = card.offsetLeft
+        const cardRight = cardLeft + card.offsetWidth
+        const currentBounds = boundsBySeason.get(seasonId)
+        boundsBySeason.set(seasonId, {
+          left: currentBounds ? Math.min(currentBounds.left, cardLeft) : cardLeft,
+          right: currentBounds ? Math.max(currentBounds.right, cardRight) : cardRight,
+        })
 
-         if (visibleWidth <= 0) continue
+        const visibleWidth = Math.min(cardRight, viewportRight) - Math.max(cardLeft, viewportLeft)
+        if (visibleWidth <= 0) continue
 
-         coverageBySeason.set(seasonId, (coverageBySeason.get(seasonId) || 0) + visibleWidth)
-       }
+        coverageBySeason.set(seasonId, (coverageBySeason.get(seasonId) || 0) + visibleWidth)
+      }
 
-       let dominantSeasonId = seasonValue
-       let dominantCoverage = -1
-       for (const [seasonId, coverage] of coverageBySeason.entries()) {
-         if (coverage > dominantCoverage) {
-           dominantCoverage = coverage
-           dominantSeasonId = seasonId
-         }
-       }
+      let dominantSeasonId = seasonValue
+      let dominantCoverage = -1
+      for (const [seasonId, coverage] of coverageBySeason.entries()) {
+        if (coverage > dominantCoverage) {
+          dominantCoverage = coverage
+          dominantSeasonId = seasonId
+        }
+      }
 
-       if (dominantSeasonId && dominantSeasonId !== activeSeasonId) {
-         setActiveSeasonId(dominantSeasonId)
-       }
+      if (dominantSeasonId && dominantSeasonId !== activeSeasonId) {
+        setActiveSeasonId(dominantSeasonId)
+      }
+
+      const activeBounds = boundsBySeason.get(dominantSeasonId || seasonValue)
+      const activeIndex = details.seasons.findIndex((season) => season.id === (dominantSeasonId || seasonValue))
+      if (!activeBounds || activeIndex < 0) {
+        return
+      }
+
+      const preloadThreshold = list.clientWidth * 0.45
+      const previousSeasonId = details.seasons[activeIndex - 1]?.id
+      const nextSeasonId = details.seasons[activeIndex + 1]?.id
+      const nextNextSeasonId = details.seasons[activeIndex + 2]?.id
+      const previousPreviousSeasonId = details.seasons[activeIndex - 2]?.id
+
+      if (previousSeasonId && viewportLeft - activeBounds.left < preloadThreshold && !seasonDetailsCacheRef.current.has(previousSeasonId)) {
+        void ensureSeasonLoaded(previousSeasonId)
+      }
+
+      if (nextSeasonId && activeBounds.right - viewportRight < preloadThreshold && !seasonDetailsCacheRef.current.has(nextSeasonId)) {
+        void ensureSeasonLoaded(nextSeasonId)
+      }
+
+      if (nextNextSeasonId && activeBounds.right - viewportRight < preloadThreshold * 0.5 && !seasonDetailsCacheRef.current.has(nextNextSeasonId)) {
+        void ensureSeasonLoaded(nextNextSeasonId)
+      }
+
+      if (previousPreviousSeasonId && viewportLeft - activeBounds.left < preloadThreshold * 0.5 && !seasonDetailsCacheRef.current.has(previousPreviousSeasonId)) {
+        void ensureSeasonLoaded(previousPreviousSeasonId)
+      }
     }
 
     syncScrollState()
@@ -1149,7 +1296,7 @@ function TitleDetailsModal(props: {
       list.removeEventListener('scroll', syncScrollState)
       window.removeEventListener('resize', syncScrollState)
     }
-  }, [activeSeasonId, details, detailsLoading, seasonValue])
+  }, [activeSeasonId, details, detailsLoading, seasonCacheVersion, seasonValue])
 
   const canRequest = Boolean(props.card.tmdbId && props.card.mediaType !== 'mixed')
   const playId = details?.playTargetId || details?.providerId || props.card.providerId
@@ -1169,17 +1316,24 @@ function TitleDetailsModal(props: {
   const jellyfinPlayerUrl = playerTarget && props.config.jellyfin.baseUrl
     ? buildJellyfinPlayerUrl(props.config.jellyfin.baseUrl, playerTarget.id)
     : ''
+  const activeSeasonMeta = details?.seasons.find((season) => season.id === seasonValue)
   const activeSeasonDetails = seasonValue ? seasonDetailsCacheRef.current.get(seasonValue) : null
   const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
   const resolvedSeasonIndex = currentSeasonIndex >= 0 ? currentSeasonIndex : 0
   const hasPreviousSeason = Boolean(details?.seasons.length && resolvedSeasonIndex > 0)
   const hasNextSeason = Boolean(details?.seasons.length && resolvedSeasonIndex < details.seasons.length - 1)
-  const visibleEpisodes = details?.seasons.flatMap((season) =>
-    (seasonDetailsCacheRef.current.get(season.id)?.episodes || []).map((episode) => ({
-      ...episode,
-      seasonId: season.id,
-    }))
-  ) ?? []
+  const previousSeasonId = hasPreviousSeason ? details?.seasons[resolvedSeasonIndex - 1]?.id : undefined
+  const nextSeasonId = hasNextSeason ? details?.seasons[resolvedSeasonIndex + 1]?.id : undefined
+  const isPreviousSeasonLoading = Boolean(previousSeasonId && loadingSeasonIds.includes(previousSeasonId))
+  const isNextSeasonLoading = Boolean(nextSeasonId && loadingSeasonIds.includes(nextSeasonId))
+  const visibleEpisodes = details?.seasons
+    .filter((season, index) => Math.abs(index - resolvedSeasonIndex) <= 2)
+    .flatMap((season) =>
+      (seasonDetailsCacheRef.current.get(season.id)?.episodes || []).map((episode) => ({
+        ...episode,
+        seasonId: season.id,
+      }))
+    ) ?? []
 
   function handleRequestClose() {
     if (!props.originRect || transitionState === 'closing') {
@@ -1347,8 +1501,8 @@ function TitleDetailsModal(props: {
                       ) : null}
                       <div className="title-season-divider" aria-hidden="true" />
                       <div className="title-season-badge">
-                        <strong>{activeSeasonDetails?.episodes.length ?? details.episodes.length}</strong>
-                        <span>{(activeSeasonDetails?.episodes.length ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
+                        <strong>{activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length}</strong>
+                        <span>{(activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
                       </div>
                       <button
                         aria-label="Next season"
@@ -1382,6 +1536,8 @@ function TitleDetailsModal(props: {
                         type="button"
                       />
                     ) : null}
+                    {isPreviousSeasonLoading ? <div className="episode-dock-spinner left" aria-hidden="true" /> : null}
+                    {isNextSeasonLoading ? <div className="episode-dock-spinner right" aria-hidden="true" /> : null}
                     <div
                       className="episode-list"
                       ref={episodeListRef}
