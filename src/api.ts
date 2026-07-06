@@ -5,8 +5,11 @@ import type {
   DashboardResponse,
   DownloadItem,
   HubPageResponse,
+  MediaCard,
   ServiceOptionsResponse,
-  SessionResponse
+  SessionResponse,
+  TitleDetailsRequest,
+  TitleDetailsResponse
 } from '../shared/contracts'
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -75,7 +78,17 @@ export const api = {
     }),
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
   getHub: (page: HubPageResponse['page']) => request<HubPageResponse>(`/api/hubs/${page}`),
+  getTitleDetails: (card: MediaCard, seasonId?: string) =>
+    request<TitleDetailsResponse>('/api/title-details', {
+      method: 'POST',
+      body: JSON.stringify({ card, seasonId } satisfies TitleDetailsRequest),
+    }),
   getDownloads: () => request<DownloadItem[]>('/api/downloads'),
+  deleteDownload: (payload: { id: string }) =>
+    request<{ ok: boolean }>('/api/downloads/delete', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   requestMovie: (tmdbId: number) =>
     request<{ ok: boolean }>('/api/requests/movie', {
       method: 'POST',

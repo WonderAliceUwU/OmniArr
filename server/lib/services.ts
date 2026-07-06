@@ -7,7 +7,11 @@ import type {
   HubSection,
   MediaCard,
   SelectOption,
-  ServiceOptionsResponse
+  ServiceOptionsResponse,
+  TitleDetailsEpisode,
+  TitleDetailsRequest,
+  TitleDetailsResponse,
+  TitleDetailsSeason
 } from '../../shared/contracts.js';
 
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
@@ -36,12 +40,17 @@ interface JellyfinItem {
   ParentBackdropImageTags?: string[];
   DateCreated?: string;
   DateLastMediaAdded?: string;
+  ChildCount?: number;
+  IndexNumberEnd?: number;
+  PremiereDate?: string;
 }
 
 interface SonarrQueueRecord {
   id?: number;
   title?: string;
-  series?: { title?: string };
+  downloadId?: string;
+  series?: { title?: string; tmdbId?: number; images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }> };
+  episode?: { seasonNumber?: number; episodeNumber?: number; title?: string };
   trackedDownloadState?: string;
   sizeleft?: number;
   size?: number;
@@ -52,7 +61,7 @@ interface SonarrQueueRecord {
 interface RadarrQueueRecord {
   id?: number;
   title?: string;
-  movie?: { title?: string };
+  movie?: { title?: string; tmdbId?: number; year?: number; images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }> };
   trackedDownloadState?: string;
   sizeleft?: number;
   size?: number;
@@ -60,14 +69,10 @@ interface RadarrQueueRecord {
   timeleft?: string;
 }
 
-interface QbitTorrent {
-  hash?: string;
-  name?: string;
-  progress?: number;
-  dlspeed?: number;
-  size?: number;
-  eta?: number;
-  state?: string;
+interface DownloadMetadataHint {
+  query: string;
+  mediaType: 'movie' | 'tv';
+  subtitle?: string;
 }
 
 const ANIME_PROVIDERS = '337|8|9|430|283';
@@ -103,11 +108,6 @@ export function sanitizeConfig(input: AppConfig): AppConfig {
       monitor: input.radarr.monitor.trim() || 'movieOnly',
       startSearch: Boolean(input.radarr.startSearch)
     },
-    qbittorrent: {
-      baseUrl: normalizeBaseUrl(input.qbittorrent.baseUrl),
-      username: input.qbittorrent.username.trim(),
-      password: input.qbittorrent.password.trim()
-    },
     tmdb: {
       bearerToken: input.tmdb.bearerToken.trim()
     }
@@ -115,15 +115,14 @@ export function sanitizeConfig(input: AppConfig): AppConfig {
 }
 
 export async function getConnectionStatuses(config: AppConfig): Promise<ConnectionStatus[]> {
-  const [jellyfin, sonarr, radarr, qbittorrent, tmdb] = await Promise.all([
+  const [jellyfin, sonarr, radarr, tmdb] = await Promise.all([
     testJellyfin(config),
     testSonarr(config),
     testRadarr(config),
-    testQbittorrent(config),
     testTmdb(config)
   ]);
 
-  return [jellyfin, sonarr, radarr, qbittorrent, tmdb];
+  return [jellyfin, sonarr, radarr, tmdb];
 }
 
 export async function getServiceOptions(config: AppConfig): Promise<ServiceOptionsResponse> {
@@ -284,55 +283,523 @@ export async function getHubPage(
 }
 
 export async function getDownloads(config: AppConfig): Promise<DownloadItem[]> {
-  const [sonarrResult, radarrResult, qbitResult] = await Promise.allSettled([
+  const [sonarrResult, radarrResult] = await Promise.allSettled([
     getSonarrQueue(config),
-    getRadarrQueue(config),
-    getQbitQueue(config)
+    getRadarrQueue(config)
   ]);
 
   const sonarr = sonarrResult.status === 'fulfilled' ? sonarrResult.value : [];
   const radarr = radarrResult.status === 'fulfilled' ? radarrResult.value : [];
-  const qbit = qbitResult.status === 'fulfilled' ? qbitResult.value : [];
 
-  return [
-    ...sonarr.map(
-      (item): DownloadItem => ({
-        id: `sonarr-${item.id ?? Math.random()}`,
-        source: 'sonarr',
-        title: item.series?.title || item.title || 'Series',
-        detail: item.title || 'Downloading episode',
-        progress: getQueueProgress(item.size, item.sizeleft),
-        state: item.status || item.trackedDownloadState || 'queue',
-        eta: item.timeleft || '',
-        size: item.size ? formatBytes(item.size) : ''
-      })
-    ),
-    ...radarr.map(
-      (item): DownloadItem => ({
-        id: `radarr-${item.id ?? Math.random()}`,
-        source: 'radarr',
-        title: item.movie?.title || item.title || 'Movie',
-        detail: item.title || 'Downloading movie',
-        progress: getQueueProgress(item.size, item.sizeleft),
-        state: item.status || item.trackedDownloadState || 'queue',
-        eta: item.timeleft || '',
-        size: item.size ? formatBytes(item.size) : ''
-      })
-    ),
-    ...qbit.map(
-      (item): DownloadItem => ({
-        id: `qbit-${item.hash || Math.random()}`,
-        source: 'qbittorrent',
-        title: item.name || 'Torrent',
-        detail: item.state || 'downloading',
-        progress: Math.round((item.progress || 0) * 100),
-        state: item.state || 'downloading',
-        eta: typeof item.eta === 'number' && item.eta > 0 ? formatEta(item.eta) : '',
-        speed: item.dlspeed ? `${formatBytes(item.dlspeed)}/s` : '',
-        size: item.size ? formatBytes(item.size) : ''
-      })
-    )
-  ].sort((a, b) => b.progress - a.progress);
+  const metadataCache = new Map<string, Promise<Partial<DownloadItem>>>();
+  const baseDownloads: DownloadItem[] = [
+    ...sonarr.map((item): DownloadItem => ({
+      id: `sonarr-${item.id ?? Math.random()}`,
+      source: 'sonarr',
+      title: item.series?.title || item.title || 'Series',
+      detail: item.title || 'Downloading episode',
+      subtitle: formatEpisodeSubtitle(item.episode, item.title),
+      progress: getQueueProgress(item.size, item.sizeleft),
+      state: item.status || item.trackedDownloadState || 'queue',
+      eta: item.timeleft || '',
+      size: item.size ? formatBytes(item.size) : '',
+      tmdbId: item.series?.tmdbId,
+      posterUrl: extractRemoteImage(item.series?.images),
+      backdropUrl: undefined,
+      mediaType: 'tv',
+      speed: undefined
+    })),
+    ...radarr.map((item): DownloadItem => ({
+      id: `radarr-${item.id ?? Math.random()}`,
+      source: 'radarr',
+      title: item.movie?.title || item.title || 'Movie',
+      detail: item.title || 'Downloading movie',
+      subtitle: item.movie?.year ? String(item.movie.year) : 'Movie',
+      progress: getQueueProgress(item.size, item.sizeleft),
+      state: item.status || item.trackedDownloadState || 'queue',
+      eta: item.timeleft || '',
+      size: item.size ? formatBytes(item.size) : '',
+      tmdbId: item.movie?.tmdbId,
+      posterUrl: extractRemoteImage(item.movie?.images),
+      backdropUrl: undefined,
+      mediaType: 'movie',
+      speed: undefined
+    }))
+  ];
+
+  const downloads = await Promise.all(
+    baseDownloads.map((item) => enrichDownloadItem(config, item, metadataCache))
+  );
+  return downloads.sort((a, b) => b.progress - a.progress);
+}
+
+export async function removeDownload(config: AppConfig, id: string): Promise<void> {
+  const [source, rawId] = id.split('-', 2);
+  if (!source || !rawId) {
+    throw new Error('Invalid download id.');
+  }
+
+  if (source !== 'sonarr' && source !== 'radarr') {
+    throw new Error('Unsupported download source.');
+  }
+
+  const baseUrl = source === 'sonarr' ? config.sonarr.baseUrl : config.radarr.baseUrl;
+  const apiKey = source === 'sonarr' ? config.sonarr.apiKey : config.radarr.apiKey;
+  if (!baseUrl || !apiKey) {
+    throw new Error(`${source === 'sonarr' ? 'Sonarr' : 'Radarr'} is not configured.`);
+  }
+
+  const response = await fetch(
+    `${baseUrl}/api/v3/queue/${encodeURIComponent(rawId)}?removeFromClient=true&blocklist=false&skipRedownload=false`,
+    {
+      method: 'DELETE',
+      headers: {
+        'X-Api-Key': apiKey
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`${source === 'sonarr' ? 'Sonarr' : 'Radarr'} ${response.status} ${response.statusText}`);
+  }
+}
+
+export async function getTitleDetails(
+  config: AppConfig,
+  request: TitleDetailsRequest
+): Promise<TitleDetailsResponse> {
+  const { card, seasonId } = request;
+  const item = card.providerId ? await getJellyfinItemDetails(config, card.providerId) : null;
+  const seriesItem = await resolveSeriesItem(config, card, item);
+  const primaryItem = seriesItem || item;
+  const detailMediaType: 'movie' | 'tv' = primaryItem?.Type === 'Movie' || card.mediaType === 'movie' ? 'movie' : 'tv';
+  const tmdbId = Number(primaryItem?.ProviderIds?.Tmdb) || card.tmdbId;
+  const originalLanguage = card.originalLanguage;
+  const [backdropUrl, logoUrl] = await Promise.all([
+    tmdbId ? getTmdbHighResBackdrop(config, tmdbId, detailMediaType, null, originalLanguage) : Promise.resolve(''),
+    tmdbId ? getPreferredTitleLogo(config, tmdbId, detailMediaType) : Promise.resolve('')
+  ]);
+
+  const title = seriesItem?.Name || primaryItem?.Name || card.title;
+  const overview = seriesItem?.Overview || primaryItem?.Overview || card.overview;
+  const subtitle = buildTitleSubtitle(seriesItem || item, card);
+  const posterUrl = resolvePrimaryPoster(seriesItem || item, card);
+  const effectiveBackdropUrl = backdropUrl || resolveBackdrop(seriesItem || item, card);
+
+  if (!seriesItem?.Id) {
+    return {
+      id: card.id,
+      tmdbId,
+      providerId: item?.Id || card.providerId,
+      playTargetId: item?.Id || card.providerId,
+      availableInJellyfin: Boolean(item?.Id || card.providerId),
+      title,
+      overview,
+      subtitle,
+      mediaType: 'movie',
+      posterUrl,
+      backdropUrl: effectiveBackdropUrl,
+      logoUrl: logoUrl || card.logoUrl,
+      seasons: [],
+      episodes: []
+    };
+  }
+
+  const seasons = await getSeriesSeasons(config, seriesItem.Id);
+  const selectedSeason = chooseSelectedSeason(seasons, seasonId, item);
+  const episodes = selectedSeason?.id
+    ? await getSeasonEpisodes(config, selectedSeason.id)
+    : [];
+  const nextEpisode = await getNextEpisodeToPlay(config, seriesItem.Id, episodes);
+
+  return {
+    id: card.id,
+    tmdbId,
+    providerId: seriesItem.Id,
+    playTargetId: nextEpisode?.id || seriesItem.Id,
+    availableInJellyfin: Boolean(seriesItem.Id),
+    title,
+    overview,
+    subtitle,
+    mediaType: 'series',
+    posterUrl,
+    backdropUrl: effectiveBackdropUrl,
+    logoUrl: logoUrl || card.logoUrl,
+    selectedSeasonId: selectedSeason?.id,
+    seasons,
+    episodes
+  };
+}
+
+async function enrichDownloadItem(
+  config: AppConfig,
+  item: DownloadItem,
+  metadataCache: Map<string, Promise<Partial<DownloadItem>>>
+): Promise<DownloadItem> {
+  if (item.tmdbId && item.backdropUrl) {
+    return item;
+  }
+
+  if (item.tmdbId) {
+    const cacheKey = `${item.mediaType === 'movie' ? 'movie' : 'tv'}:tmdb:${item.tmdbId}`;
+    let metadataPromise = metadataCache.get(cacheKey);
+    if (!metadataPromise) {
+      metadataPromise = findDownloadMetadataByTmdbId(config, item.tmdbId, item.mediaType === 'movie' ? 'movie' : 'tv');
+      metadataCache.set(cacheKey, metadataPromise);
+    }
+    const metadata = await metadataPromise;
+    return {
+      ...item,
+      ...metadata,
+      posterUrl: item.posterUrl || metadata.posterUrl,
+      backdropUrl: item.backdropUrl || metadata.backdropUrl,
+      subtitle: item.subtitle || metadata.subtitle
+    };
+  }
+
+  const hint = inferDownloadHint(item.detail || item.title);
+  if (!hint.query) {
+    return item;
+  }
+
+  const cacheKey = `${hint.mediaType}:${hint.query}`;
+  let metadataPromise = metadataCache.get(cacheKey);
+  if (!metadataPromise) {
+    metadataPromise = findDownloadMetadata(config, hint);
+    metadataCache.set(cacheKey, metadataPromise);
+  }
+
+  return {
+    ...item,
+    ...(await metadataPromise)
+  };
+}
+
+async function findDownloadMetadataByTmdbId(
+  config: AppConfig,
+  tmdbId: number,
+  mediaType: 'movie' | 'tv'
+): Promise<Partial<DownloadItem>> {
+  try {
+    const response = await tmdbFetch(
+      config,
+      `/${mediaType}/${tmdbId}?language=${encodeURIComponent(config.preferences.language)}`
+    );
+    if (!response) {
+      return {};
+    }
+    const card = tmdbToCard(response, mediaType);
+    const englishBackdropUrl = await getTmdbHighResBackdrop(config, tmdbId, mediaType, 'en', card.originalLanguage);
+    return {
+      title: card.title,
+      posterUrl: card.posterUrl,
+      backdropUrl: englishBackdropUrl || card.backdropUrl,
+      tmdbId: card.tmdbId,
+      mediaType: mediaType === 'tv' ? 'series' : 'movie'
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function findDownloadMetadata(
+  config: AppConfig,
+  hint: DownloadMetadataHint
+): Promise<Partial<DownloadItem>> {
+  try {
+    const response = await tmdbFetch(
+      config,
+      `/search/${hint.mediaType}?query=${encodeURIComponent(hint.query)}&language=${encodeURIComponent(config.preferences.language)}`
+    );
+    const match = asArray(response?.results)
+      .map((entry) => asRecord(entry))
+      .find((entry) => entry.id);
+    if (!match) {
+      return {};
+    }
+
+    const card = tmdbToCard(match, hint.mediaType);
+    const englishBackdropUrl = card.tmdbId
+      ? await getTmdbHighResBackdrop(config, card.tmdbId, hint.mediaType, 'en', card.originalLanguage)
+      : '';
+    return {
+      title: card.title,
+      posterUrl: card.posterUrl,
+      backdropUrl: englishBackdropUrl || card.backdropUrl,
+      tmdbId: card.tmdbId,
+      mediaType: hint.mediaType === 'tv' ? 'series' : 'movie',
+      subtitle: hint.subtitle
+    };
+  } catch {
+    return {};
+  }
+}
+
+function inferDownloadHint(rawTitle: string): DownloadMetadataHint {
+  const scope = inferDownloadScope(rawTitle);
+  const cleaned = rawTitle
+    .replace(/\[[^\]]*]/g, ' ')
+    .replace(/\([^)]*]/g, ' ')
+    .replace(/[._]/g, ' ')
+    .replace(/\b(2160p|1080p|720p|480p|x264|x265|h\.?264|h\.?265|hevc|hdr10\+?|aac2?\.?0|ddp\d?\.?\d?|atmos|web[- ]?dl|webrip|bluray|bdremux|remux|multi[- ]subs?|dual[- ]audio|repack|proper|complete|extras)\b/gi, ' ')
+    .replace(/\b(S\d{1,2}E\d{1,3}|E\d{1,3}|EP\d{1,3}|Season\s+\d+|Part\s+\d+)\b.*$/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    query: cleaned || rawTitle,
+    mediaType: scope.mediaType,
+    subtitle: scope.scopeLabel
+  };
+}
+
+function formatEpisodeSubtitle(
+  episode: { seasonNumber?: number; episodeNumber?: number; title?: string } | undefined,
+  rawTitle: string | undefined
+): string {
+  const seasonNumber = episode?.seasonNumber;
+  const episodeNumber = episode?.episodeNumber;
+  const seasonEpisodeLabel = seasonNumber && episodeNumber
+    ? `Season ${seasonNumber}, Episode ${episodeNumber}`
+    : extractSeasonEpisodeLabel(rawTitle || '');
+  return [seasonEpisodeLabel, episode?.title].filter(Boolean).join(' · ') || 'Episode';
+}
+
+function extractSeasonEpisodeLabel(rawTitle: string): string {
+  const seasonEpisodeMatch = rawTitle.match(/\bS(\d{1,2})E(\d{1,3})\b/i);
+  if (seasonEpisodeMatch) {
+    return `Season ${Number(seasonEpisodeMatch[1])}, Episode ${Number(seasonEpisodeMatch[2])}`;
+  }
+
+  const episodeMatch = rawTitle.match(/\bEP?(\d{1,3})\b/i);
+  if (episodeMatch) {
+    return `Episode ${Number(episodeMatch[1])}`;
+  }
+
+  return '';
+}
+
+function inferDownloadScope(rawTitle: string): { scopeLabel: string; mediaType: 'movie' | 'tv' } {
+  if (/\bS\d{1,2}E\d{1,3}\b/i.test(rawTitle) || /\bEP?\d{1,3}\b/i.test(rawTitle)) {
+    return { scopeLabel: 'Episode', mediaType: 'tv' };
+  }
+  if (/\bcomplete\b|\bcollection\b|\bseasons?\s*\d+\s*-\s*\d+\b/i.test(rawTitle)) {
+    return { scopeLabel: 'Series', mediaType: 'tv' };
+  }
+  if (/\bSeason\s+\d+\b/i.test(rawTitle) || /\bS\d{1,2}\b/i.test(rawTitle)) {
+    return { scopeLabel: 'Season', mediaType: 'tv' };
+  }
+  return { scopeLabel: 'Movie', mediaType: 'movie' };
+}
+
+function extractRemoteImage(
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>
+): string | undefined {
+  const poster = images?.find((image) => image.coverType === 'poster');
+  return poster?.remoteUrl || poster?.url || undefined;
+}
+
+async function getJellyfinItemDetails(config: AppConfig, itemId: string): Promise<JellyfinItem | null> {
+  if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey || !config.jellyfin.userId) {
+    return null;
+  }
+
+  try {
+    return await jellyfinFetch<JellyfinItem>(
+      config,
+      `/Users/${config.jellyfin.userId}/Items/${encodeURIComponent(itemId)}?fields=ProviderIds,Overview,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,ProductionYear,SeriesId,SeriesName,PremiereDate,ChildCount`
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSeriesItem(
+  config: AppConfig,
+  card: MediaCard,
+  item: JellyfinItem | null
+): Promise<JellyfinItem | null> {
+  if (item?.Type === 'Series') {
+    return item;
+  }
+
+  const seriesId = item?.SeriesId || (card.mediaType === 'series' || card.mediaType === 'tv' ? card.providerId : '');
+  if (!seriesId) {
+    return null;
+  }
+
+  return getJellyfinItemDetails(config, seriesId);
+}
+
+function buildJellyfinAssetUrl(itemId: string, kind: string, maxWidth: number, tag: string): string {
+  return `/api/assets/jellyfin/${itemId}?kind=${encodeURIComponent(kind)}&maxWidth=${maxWidth}&tag=${encodeURIComponent(tag)}`;
+}
+
+function resolvePrimaryPoster(item: JellyfinItem | null, card: MediaCard): string {
+  if (item?.Id) {
+    const posterTag = item.ImageTags?.Primary || '';
+    return buildJellyfinAssetUrl(item.Id, 'Primary', 640, posterTag);
+  }
+
+  return card.posterUrl;
+}
+
+function resolveBackdrop(item: JellyfinItem | null, card: MediaCard): string {
+  if (item?.Id) {
+    const backdropItemId = item.ParentBackdropItemId || item.Id;
+    const backdropTag = item.ParentBackdropImageTags?.[0] || item.BackdropImageTags?.[0] || item.ImageTags?.Primary || '';
+    return buildJellyfinAssetUrl(backdropItemId, 'Backdrop', 1920, backdropTag);
+  }
+
+  return card.backdropUrl || card.posterUrl;
+}
+
+function buildTitleSubtitle(item: JellyfinItem | null, card: MediaCard): string {
+  if (!item) {
+    return card.subtitle;
+  }
+
+  if (item.Type === 'Movie') {
+    return item.ProductionYear ? String(item.ProductionYear) : card.subtitle;
+  }
+
+  if (item.Type === 'Series') {
+    return item.ProductionYear ? String(item.ProductionYear) : card.subtitle;
+  }
+
+  if (item.Type === 'Episode') {
+    return [item.SeriesName, formatEpisodeCode(item.ParentIndexNumber, item.IndexNumber)].filter(Boolean).join(' · ') || card.subtitle;
+  }
+
+  return card.subtitle;
+}
+
+async function getPreferredTitleLogo(
+  config: AppConfig,
+  tmdbId: number,
+  mediaType: 'movie' | 'tv'
+): Promise<string> {
+  const logos = await getTmdbLogos(config, tmdbId, mediaType);
+  const englishLogo = logos.find((logo) => logo.iso_639_1 === 'en' || logo.iso_639_1 === 'en-US');
+  const noLanguageLogo = logos.find((logo) => logo.iso_639_1 == null);
+  const selectedLogo = englishLogo || noLanguageLogo || logos[0];
+  return selectedLogo?.file_path ? `${TMDB_IMAGE}/original${selectedLogo.file_path}` : '';
+}
+
+async function getSeriesSeasons(config: AppConfig, seriesId: string): Promise<TitleDetailsSeason[]> {
+  try {
+    const seasons = await jellyfinFetch<JellyfinItem[]>(
+      config,
+      `/Users/${encodeURIComponent(config.jellyfin.userId)}/Items?parentId=${encodeURIComponent(seriesId)}&includeItemTypes=Season&fields=Overview,ImageTags,IndexNumber,ChildCount&sortBy=SortName`
+    );
+
+    return seasons
+      .filter((season) => season.Id)
+      .map((season) => ({
+        id: String(season.Id),
+        title: season.Name || (typeof season.IndexNumber === 'number' ? `Season ${season.IndexNumber}` : 'Season'),
+        seasonNumber: typeof season.IndexNumber === 'number' ? season.IndexNumber : undefined,
+        episodeCount: typeof season.ChildCount === 'number' ? season.ChildCount : undefined
+      }))
+      .sort((left, right) => {
+        const leftNumber = left.seasonNumber === 0 ? Number.MAX_SAFE_INTEGER : left.seasonNumber ?? Number.MAX_SAFE_INTEGER - 1;
+        const rightNumber = right.seasonNumber === 0 ? Number.MAX_SAFE_INTEGER : right.seasonNumber ?? Number.MAX_SAFE_INTEGER - 1;
+        return leftNumber - rightNumber;
+      });
+  } catch {
+    return [];
+  }
+}
+
+function chooseSelectedSeason(
+  seasons: TitleDetailsSeason[],
+  requestedSeasonId: string | undefined,
+  item: JellyfinItem | null
+): TitleDetailsSeason | undefined {
+  if (requestedSeasonId) {
+    const requestedSeason = seasons.find((season) => season.id === requestedSeasonId);
+    if (requestedSeason) {
+      return requestedSeason;
+    }
+  }
+
+  if (item?.Type === 'Episode' && typeof item.ParentIndexNumber === 'number') {
+    const matchingSeason = seasons.find((season) => season.seasonNumber === item.ParentIndexNumber);
+    if (matchingSeason) {
+      return matchingSeason;
+    }
+  }
+
+  return seasons.find((season) => season.seasonNumber && season.seasonNumber > 0) || seasons[0];
+}
+
+async function getSeasonEpisodes(config: AppConfig, seasonId: string): Promise<TitleDetailsEpisode[]> {
+  try {
+    const episodes = await jellyfinFetch<JellyfinItem[]>(
+      config,
+      `/Users/${encodeURIComponent(config.jellyfin.userId)}/Items?parentId=${encodeURIComponent(seasonId)}&includeItemTypes=Episode&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&sortBy=SortName`
+    );
+
+    return episodes
+      .filter((episode) => episode.Id)
+      .sort((left, right) => (left.IndexNumber ?? 0) - (right.IndexNumber ?? 0))
+      .map((episode) => {
+        const imageTag = episode.ImageTags?.Primary || '';
+        return {
+          id: String(episode.Id),
+          title: episode.Name || `Episode ${episode.IndexNumber ?? ''}`.trim(),
+          overview: episode.Overview || '',
+          subtitle: [
+            typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
+            typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
+          ].filter(Boolean).join(', '),
+          imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
+          seasonNumber: episode.ParentIndexNumber,
+          episodeNumber: episode.IndexNumber,
+          runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+async function getNextEpisodeToPlay(
+  config: AppConfig,
+  seriesId: string,
+  currentEpisodes: TitleDetailsEpisode[]
+): Promise<TitleDetailsEpisode | null> {
+  if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey || !config.jellyfin.userId) {
+    return currentEpisodes[0] || null;
+  }
+
+  try {
+    const response = await jellyfinFetch<{ Items?: JellyfinItem[] }>(
+      config,
+      `/Shows/NextUp?userId=${encodeURIComponent(config.jellyfin.userId)}&seriesId=${encodeURIComponent(seriesId)}&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&limit=1`
+    );
+    const episode = response.Items?.[0];
+    if (!episode?.Id) {
+      return currentEpisodes[0] || null;
+    }
+
+    const imageTag = episode.ImageTags?.Primary || '';
+    return {
+      id: String(episode.Id),
+      title: episode.Name || `Episode ${episode.IndexNumber ?? ''}`.trim(),
+      overview: episode.Overview || '',
+      subtitle: [
+        typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
+        typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
+      ].filter(Boolean).join(', '),
+      imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
+      seasonNumber: episode.ParentIndexNumber,
+      episodeNumber: episode.IndexNumber,
+      runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined
+    };
+  } catch {
+    return currentEpisodes[0] || null;
+  }
 }
 
 export async function requestMovie(config: AppConfig, tmdbId: number): Promise<void> {
@@ -626,11 +1093,11 @@ async function buildHomeHub(
     hero: heroCandidates,
     sections: [
       { id: 'trending', title: 'Trending', style: 'landscape', items: filteredHero },
-      { id: 'upcoming-movies', title: 'Upcoming Movies', style: 'landscape', items: filter(upcomingMovies || []) },
-      { id: 'upcoming-series', title: 'Upcoming Series', style: 'landscape', items: filter(upcomingSeries || []) },
       { id: 'digital', title: 'New Digital Releases', style: 'landscape', items: filter(digitalReleases || []) },
       { id: 'streaming', title: 'Streaming Now', style: 'landscape', items: filter(streamingNow || []) },
-      { id: 'recently-added', title: 'Recently Added', style: 'landscape', items: library.recentlyAdded || [] }
+      { id: 'recently-added', title: 'Recently Added', style: 'landscape', items: library.recentlyAdded || [] },
+      { id: 'upcoming-movies', title: 'Upcoming Movies', style: 'landscape', items: filter(upcomingMovies || []) },
+      { id: 'upcoming-series', title: 'Upcoming Series', style: 'landscape', items: filter(upcomingSeries || []) }
     ]
   };
 }
@@ -1121,24 +1588,6 @@ async function getRadarrQueue(config: AppConfig): Promise<RadarrQueueRecord[]> {
   return response.records || [];
 }
 
-async function getQbitQueue(config: AppConfig): Promise<QbitTorrent[]> {
-  if (!config.qbittorrent.baseUrl || !config.qbittorrent.username || !config.qbittorrent.password) {
-    return [];
-  }
-
-  const cookie = await loginQbit(config);
-  const response = await fetchJson<QbitTorrent[]>(
-    `${config.qbittorrent.baseUrl}/api/v2/torrents/info`,
-    {
-      headers: {
-        Cookie: cookie
-      }
-    }
-  );
-
-  return response;
-}
-
 async function testJellyfin(config: AppConfig): Promise<ConnectionStatus> {
   if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
     return {
@@ -1220,29 +1669,6 @@ async function testRadarr(config: AppConfig): Promise<ConnectionStatus> {
   }
 }
 
-async function testQbittorrent(config: AppConfig): Promise<ConnectionStatus> {
-  if (!config.qbittorrent.baseUrl || !config.qbittorrent.username || !config.qbittorrent.password) {
-    return {
-      key: 'qbittorrent',
-      label: 'qBittorrent',
-      ok: false,
-      message: 'Not configured'
-    };
-  }
-
-  try {
-    await loginQbit(config);
-    return { key: 'qbittorrent', label: 'qBittorrent', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'qbittorrent',
-      label: 'qBittorrent',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
-}
-
 async function testTmdb(config: AppConfig): Promise<ConnectionStatus> {
   if (!getTmdbToken(config)) {
     return {
@@ -1300,30 +1726,6 @@ async function tmdbFetch(config: AppConfig, pathWithQuery: string): Promise<Reco
     console.error(`TMDb fetch failed for ${pathWithQuery}:`, err);
     return null;
   }
-}
-
-async function loginQbit(config: AppConfig): Promise<string> {
-  const response = await fetch(`${config.qbittorrent.baseUrl}/api/v2/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-    },
-    body: new URLSearchParams({
-      username: config.qbittorrent.username,
-      password: config.qbittorrent.password
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`qBittorrent ${response.status}`);
-  }
-
-  const cookie = response.headers.get('set-cookie');
-  if (!cookie) {
-    throw new Error('qBittorrent did not return a session cookie.');
-  }
-
-  return cookie.split(';', 1)[0];
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -1414,7 +1816,7 @@ function tmdbToCard(item: Record<string, unknown>, mediaType: 'movie' | 'tv'): M
     overview: String(item.overview || ''),
     mediaType,
     posterUrl: posterPath ? `${TMDB_IMAGE}/w500${posterPath}` : '',
-    backdropUrl: backdropPath ? `${TMDB_IMAGE}/original${backdropPath}` : '',
+    backdropUrl: backdropPath ? `${TMDB_IMAGE}/w1280${backdropPath}` : '',
     badge: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
     actionLabel: mediaType === 'movie' ? 'Add to Radarr' : 'Add to Sonarr',
     popularity: Number(item.popularity || 0) || undefined,
@@ -1598,10 +2000,10 @@ async function applyHighResBackdropsToCards(
       }
 
       const mediaType: 'movie' | 'tv' = card.mediaType === 'movie' ? 'movie' : 'tv';
-      const cacheKey = `${mediaType}:${card.tmdbId}:${preferredLanguage || 'any'}`;
+      const cacheKey = `${mediaType}:${card.tmdbId}:${preferredLanguage || 'any'}:${card.originalLanguage || 'none'}`;
       let backdropPromise = backdropCache.get(cacheKey);
       if (!backdropPromise) {
-        backdropPromise = getTmdbHighResBackdrop(config, card.tmdbId!, mediaType, preferredLanguage);
+        backdropPromise = getTmdbHighResBackdrop(config, card.tmdbId!, mediaType, preferredLanguage, card.originalLanguage);
         backdropCache.set(cacheKey, backdropPromise);
       }
 
@@ -1630,6 +2032,10 @@ function shouldUseHighResBackdropForCard(card: MediaCard): boolean {
 
 function tmdbImagesPath(tmdbId: number, mediaType: 'movie' | 'tv'): string {
   return `/${mediaType}/${tmdbId}/images?include_image_language=en,en-US,null`;
+}
+
+function tmdbBackdropImagesPath(tmdbId: number, mediaType: 'movie' | 'tv'): string {
+  return `/${mediaType}/${tmdbId}/images`;
 }
 
 function formatPlaybackTime(playbackPositionTicks?: number): string | undefined {
@@ -1674,10 +2080,11 @@ async function getTmdbHighResBackdrop(
   config: AppConfig,
   tmdbId: number,
   mediaType: 'movie' | 'tv',
-  preferredLanguage?: string | null
+  preferredLanguage?: string | null,
+  originalLanguage?: string | null
 ): Promise<string> {
   try {
-    const response = await tmdbFetch(config, tmdbImagesPath(tmdbId, mediaType));
+    const response = await tmdbFetch(config, tmdbBackdropImagesPath(tmdbId, mediaType));
     let backdrops = asArray(response?.backdrops)
       .map((entry) => asRecord(entry));
     
@@ -1685,22 +2092,44 @@ async function getTmdbHighResBackdrop(
       return '';
     }
 
+    const sortByWidthDesc = (items: Record<string, unknown>[]) =>
+      [...items].sort((a, b) => Number(b.width || 0) - Number(a.width || 0));
+
     // Filter by language if requested
     if (preferredLanguage) {
-      const filtered = backdrops.filter(
-        (b) => String(b.iso_639_1) === preferredLanguage
-      );
+      const filtered = backdrops.filter((b) => {
+        const language = String(b.iso_639_1 || '');
+        if (preferredLanguage === 'en') {
+          return language === 'en' || language === 'en-US';
+        }
+        return language === preferredLanguage;
+      });
       if (filtered.length > 0) {
         backdrops = filtered;
+      } else if (preferredLanguage === 'en' && (originalLanguage === 'ja' || originalLanguage === 'ko')) {
+        const fallbackFiltered = backdrops.filter(
+          (b) => String(b.iso_639_1 || '') === originalLanguage
+        );
+        if (fallbackFiltered.length > 0) {
+          backdrops = fallbackFiltered;
+        }
       }
     }
 
-    // Sort by width descending if no language preference (Carousel use case)
     if (!preferredLanguage) {
-      backdrops.sort((a, b) => Number(b.width || 0) - Number(a.width || 0));
+      const noLanguageBackdrops = sortByWidthDesc(
+        backdrops.filter((entry) => entry.iso_639_1 == null)
+      );
+      if (noLanguageBackdrops.length > 0) {
+        backdrops = noLanguageBackdrops;
+      } else {
+        const englishBackdrops = sortByWidthDesc(
+          backdrops.filter((entry) => entry.iso_639_1 === 'en' || entry.iso_639_1 === 'en-US')
+        );
+        backdrops = englishBackdrops.length > 0 ? englishBackdrops : sortByWidthDesc(backdrops);
+      }
     }
 
-    // The first one is the first available one (after language filter and/or sorting)
     const selectedBackdrop = backdrops.find(
       (entry) => typeof entry.file_path === 'string' && entry.file_path
     );
@@ -1755,20 +2184,6 @@ function formatBytes(bytes: number): string {
   }
 
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function formatEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return '';
-  }
-
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  return `${minutes}m`;
 }
 
 function errorMessage(error: unknown): string {
