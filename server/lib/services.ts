@@ -11,7 +11,8 @@ import type {
   TitleDetailsEpisode,
   TitleDetailsRequest,
   TitleDetailsResponse,
-  TitleDetailsSeason
+  TitleDetailsSeason,
+  EpisodeWatchStateRequest
 } from '../../shared/contracts.js';
 
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
@@ -406,17 +407,21 @@ export async function getTitleDetails(
   }
 
   const seasons = await getSeriesSeasons(config, seriesItem.Id);
-  const selectedSeason = chooseSelectedSeason(seasons, seasonId, item);
+  const nextEpisode = await getNextEpisodeToPlay(config, seriesItem.Id);
+  const selectedSeason = chooseSelectedSeason(seasons, seasonId, item, nextEpisode);
   const episodes = selectedSeason?.id
-    ? await getSeasonEpisodes(config, selectedSeason.id)
+    ? await getSeasonEpisodes(config, seriesItem.Id, selectedSeason.id)
     : [];
-  const nextEpisode = await getNextEpisodeToPlay(config, seriesItem.Id, episodes);
+
+  const resolvedNextEpisode = nextEpisode && episodes.some((episode) => episode.id === nextEpisode.id)
+    ? episodes.find((episode) => episode.id === nextEpisode.id) || nextEpisode
+    : nextEpisode;
 
   return {
     id: card.id,
     tmdbId,
     providerId: seriesItem.Id,
-    playTargetId: nextEpisode?.id || seriesItem.Id,
+    playTargetId: resolvedNextEpisode?.id || seriesItem.Id,
     availableInJellyfin: Boolean(seriesItem.Id),
     title,
     overview,
@@ -714,12 +719,20 @@ async function getSeriesSeasons(config: AppConfig, seriesId: string): Promise<Ti
 function chooseSelectedSeason(
   seasons: TitleDetailsSeason[],
   requestedSeasonId: string | undefined,
-  item: JellyfinItem | null
+  item: JellyfinItem | null,
+  nextEpisode?: TitleDetailsEpisode | null
 ): TitleDetailsSeason | undefined {
   if (requestedSeasonId) {
     const requestedSeason = seasons.find((season) => season.id === requestedSeasonId);
     if (requestedSeason) {
       return requestedSeason;
+    }
+  }
+
+  if (typeof nextEpisode?.seasonNumber === 'number') {
+    const matchingSeason = seasons.find((season) => season.seasonNumber === nextEpisode.seasonNumber);
+    if (matchingSeason) {
+      return matchingSeason;
     }
   }
 
@@ -733,32 +746,17 @@ function chooseSelectedSeason(
   return seasons.find((season) => season.seasonNumber && season.seasonNumber > 0) || seasons[0];
 }
 
-async function getSeasonEpisodes(config: AppConfig, seasonId: string): Promise<TitleDetailsEpisode[]> {
+async function getSeasonEpisodes(config: AppConfig, seriesId: string, seasonId: string): Promise<TitleDetailsEpisode[]> {
   try {
     const episodes = await jellyfinFetch<JellyfinItem[]>(
       config,
-      `/Users/${encodeURIComponent(config.jellyfin.userId)}/Items?parentId=${encodeURIComponent(seasonId)}&includeItemTypes=Episode&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&sortBy=SortName`
+      `/Shows/${encodeURIComponent(seriesId)}/Episodes?userId=${encodeURIComponent(config.jellyfin.userId)}&seasonId=${encodeURIComponent(seasonId)}&enableUserData=true&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&sortBy=SortName`
     );
 
     return episodes
       .filter((episode) => episode.Id)
       .sort((left, right) => (left.IndexNumber ?? 0) - (right.IndexNumber ?? 0))
-      .map((episode) => {
-        const imageTag = episode.ImageTags?.Primary || '';
-        return {
-          id: String(episode.Id),
-          title: episode.Name || `Episode ${episode.IndexNumber ?? ''}`.trim(),
-          overview: episode.Overview || '',
-          subtitle: [
-            typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
-            typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
-          ].filter(Boolean).join(', '),
-          imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
-          seasonNumber: episode.ParentIndexNumber,
-          episodeNumber: episode.IndexNumber,
-          runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined
-        };
-      });
+      .map(mapJellyfinEpisode);
   } catch {
     return [];
   }
@@ -766,40 +764,71 @@ async function getSeasonEpisodes(config: AppConfig, seasonId: string): Promise<T
 
 async function getNextEpisodeToPlay(
   config: AppConfig,
-  seriesId: string,
-  currentEpisodes: TitleDetailsEpisode[]
+  seriesId: string
 ): Promise<TitleDetailsEpisode | null> {
   if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey || !config.jellyfin.userId) {
-    return currentEpisodes[0] || null;
+    return null;
   }
 
   try {
     const response = await jellyfinFetch<{ Items?: JellyfinItem[] }>(
       config,
-      `/Shows/NextUp?userId=${encodeURIComponent(config.jellyfin.userId)}&seriesId=${encodeURIComponent(seriesId)}&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&limit=1`
+      `/Shows/NextUp?userId=${encodeURIComponent(config.jellyfin.userId)}&seriesId=${encodeURIComponent(seriesId)}&enableUserData=true&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&limit=1`
     );
-    const episode = response.Items?.[0];
-    if (!episode?.Id) {
-      return currentEpisodes[0] || null;
+    const episode = response.Items?.find((item) => item.Id);
+    if (episode) {
+      return mapJellyfinEpisode(episode);
     }
-
-    const imageTag = episode.ImageTags?.Primary || '';
-    return {
-      id: String(episode.Id),
-      title: episode.Name || `Episode ${episode.IndexNumber ?? ''}`.trim(),
-      overview: episode.Overview || '',
-      subtitle: [
-        typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
-        typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
-      ].filter(Boolean).join(', '),
-      imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
-      seasonNumber: episode.ParentIndexNumber,
-      episodeNumber: episode.IndexNumber,
-      runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined
-    };
   } catch {
-    return currentEpisodes[0] || null;
   }
+
+  try {
+    const episodes = await getSeriesEpisodesForNextUp(config, seriesId);
+    const nextEpisode = episodes.find((episode) => !episode.watched);
+    return nextEpisode || episodes[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getSeriesEpisodesForNextUp(config: AppConfig, seriesId: string): Promise<TitleDetailsEpisode[]> {
+  const episodes = await jellyfinFetch<JellyfinItem[]>(
+    config,
+    `/Users/${encodeURIComponent(config.jellyfin.userId)}/Items?parentId=${encodeURIComponent(seriesId)}&recursive=true&includeItemTypes=Episode&enableUserData=true&fields=Overview,ImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber&sortBy=SortName`
+  );
+
+  return episodes
+    .filter((episode) => episode.Id)
+    .sort((left, right) => {
+      const seasonDifference = (left.ParentIndexNumber ?? 0) - (right.ParentIndexNumber ?? 0);
+      if (seasonDifference !== 0) {
+        return seasonDifference;
+      }
+
+      return (left.IndexNumber ?? 0) - (right.IndexNumber ?? 0);
+    })
+    .map(mapJellyfinEpisode);
+}
+
+function mapJellyfinEpisode(episode: JellyfinItem): TitleDetailsEpisode {
+  const imageTag = episode.ImageTags?.Primary || '';
+
+  return {
+    id: String(episode.Id),
+    title: episode.Name || `Episode ${episode.IndexNumber ?? ''}`.trim(),
+    overview: episode.Overview || '',
+    subtitle: [
+      typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
+      typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
+    ].filter(Boolean).join(', '),
+    imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
+    seasonNumber: episode.ParentIndexNumber,
+    episodeNumber: episode.IndexNumber,
+    runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined,
+    watched: Boolean(episode.UserData?.Played),
+    progress: Math.max(0, Math.min(100, Math.round(episode.UserData?.PlayedPercentage || 0))) || undefined,
+    playbackPositionTicks: episode.UserData?.PlaybackPositionTicks
+  };
 }
 
 export async function requestMovie(config: AppConfig, tmdbId: number): Promise<void> {
@@ -864,6 +893,31 @@ export async function requestSeries(config: AppConfig, tmdbId: number): Promise<
       }
     })
   });
+}
+
+export async function setEpisodeWatchState(config: AppConfig, payload: EpisodeWatchStateRequest): Promise<void> {
+  if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey || !config.jellyfin.userId) {
+    throw new Error('Jellyfin is not configured.');
+  }
+
+  const episodeId = String(payload.episodeId || '')
+  if (!episodeId) {
+    throw new Error('Episode id is required.')
+  }
+
+  const path = `/Users/${encodeURIComponent(config.jellyfin.userId)}/PlayedItems/${encodeURIComponent(episodeId)}`
+  const url = `${config.jellyfin.baseUrl}${path}`
+  const response = await fetch(payload.watched ? `${url}?datePlayed=${encodeURIComponent(new Date().toISOString())}` : url, {
+    method: payload.watched ? 'POST' : 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'X-Emby-Token': config.jellyfin.apiKey
+    }
+  })
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`)
+  }
 }
 
 export async function proxyJellyfinImage(

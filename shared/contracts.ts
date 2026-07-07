@@ -116,6 +116,9 @@ export interface TitleDetailsEpisode {
   seasonNumber?: number;
   episodeNumber?: number;
   runtimeMinutes?: number;
+  watched?: boolean;
+  progress?: number;
+  playbackPositionTicks?: number;
 }
 
 export interface TitleDetailsSeason {
@@ -173,6 +176,11 @@ export interface DashboardResponse {
 export interface TitleDetailsRequest {
   card: MediaCard;
   seasonId?: string;
+}
+
+export interface EpisodeWatchStateRequest {
+  episodeId: string;
+  watched: boolean;
 }
 
 export interface HubSection {
