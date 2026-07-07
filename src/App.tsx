@@ -20,6 +20,7 @@ import {
   type MediaCard,
   type SelectOption,
   type ServiceOptionsResponse,
+  type TitleDetailsCastMember,
   type TitleDetailsEpisode,
   type TitleDetailsResponse,
 } from '../shared/contracts'
@@ -1319,6 +1320,7 @@ function TitleDetailsModal(props: {
     || (canRequest && !details?.sonarrSeriesId && typeof activeSeasonNumber === 'number')
   )
   const canDeleteSeasonAction = Boolean(activeSeasonMeta?.canDelete)
+  const shouldShowDownloadSeasonAction = canDownloadSeasonAction && !canDeleteSeasonAction
 
   useEffect(() => {
     if (!details || details.mediaType !== 'series') {
@@ -1518,258 +1520,286 @@ function TitleDetailsModal(props: {
 
           <div className={playerTarget && jellyfinPlayerUrl ? 'title-details-body has-embedded-player' : 'title-details-body'}>
             <div className="title-details-shell">
-              {detailsError ? <p className="error-banner">{detailsError}</p> : null}
-              {playerTarget && jellyfinPlayerUrl ? null : (
-              <div className="title-details-summary">
-                <div className="title-details-hero-heading">
-                  {logoUrl ? (
-                    <img alt={displayTitle} className="title-details-logo" src={logoUrl} />
-                  ) : (
-                    <h2 className="title-details-title">{displayTitle}</h2>
-                  )}
-                </div>
-                <div className="title-details-summary-content">
-                  <p className="title-details-overview">
-                    {isOverviewExpanded ? displayOverview : truncatedOverview}
-                    {shouldShowOverviewToggle ? (
-                      <>
-                        {' '}
-                        <button
-                          className="title-details-overview-toggle"
-                          onClick={() => setIsOverviewExpanded((current) => !current)}
-                          type="button"
-                        >
-                          {isOverviewExpanded ? 'less' : 'more'}
-                        </button>
-                      </>
-                    ) : null}
-                  </p>
-                  <div className="title-details-summary-header">
-                    {canPlay ? (
-                      <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} type="button">
-                        <PlayGlyph />
-                        <span>Play</span>
-                      </button>
-                    ) : canRequest ? (
-                      <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
-                        <DownloadGlyph />
-                        <span>Request</span>
-                      </button>
-                    ) : null}
+              <div className="title-details-primary">
+                {detailsError ? <p className="error-banner">{detailsError}</p> : null}
+                {playerTarget && jellyfinPlayerUrl ? null : (
+                <div className="title-details-summary">
+                  <div className="title-details-hero-heading">
+                    {logoUrl ? (
+                      <img alt={displayTitle} className="title-details-logo" src={logoUrl} />
+                    ) : (
+                      <h2 className="title-details-title">{displayTitle}</h2>
+                    )}
                   </div>
-                </div>
-                {displayYear ? <p className="title-details-year">{displayYear}</p> : null}
-              </div>
-              )}
-              {details?.mediaType === 'series' ? (
-                <div className="title-seasons-panel">
-                  <div className="title-seasons-header">
-                    <div
-                      className="title-season-strip"
-                    >
-                      {hasPreviousSeason ? (
-                        <button
-                          aria-label="Previous season"
-                          className="title-season-nav"
-                          onClick={() => changeSeason(-1)}
-                          type="button"
-                        />
-                      ) : null}
-                      {details.seasons.length ? (
-                        <label className="title-season-selector">
-                          <span className="title-season-kicker">Season</span>
-                          <select
-                            className="title-season-select"
-                            onChange={(event) => handleSeasonSelectChange(event.target.value)}
-                            value={seasonValue}
+                  <div className="title-details-summary-content">
+                    <p className="title-details-overview">
+                      {isOverviewExpanded ? displayOverview : truncatedOverview}
+                      {shouldShowOverviewToggle ? (
+                        <>
+                          {' '}
+                          <button
+                            className="title-details-overview-toggle"
+                            onClick={() => setIsOverviewExpanded((current) => !current)}
+                            type="button"
                           >
-                            {details.seasons.map((season) => (
-                              <option key={season.id} value={season.id}>
-                                {season.title}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            {isOverviewExpanded ? 'less' : 'more'}
+                          </button>
+                        </>
                       ) : null}
-                      <div className="title-season-divider" aria-hidden="true" />
-                      <div className="title-season-badge">
-                        <strong>{activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length}</strong>
-                        <span>{(activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
-                      </div>
-                          {canDownloadSeasonAction || canDeleteSeasonAction ? (
+                    </p>
+                    <div className="title-details-summary-header">
+                      {canPlay ? (
+                        <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} type="button">
+                          <PlayGlyph />
+                          <span>Play</span>
+                        </button>
+                      ) : canRequest ? (
+                        <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
+                          <DownloadGlyph />
+                          <span>Request</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {displayYear ? <p className="title-details-year">{displayYear}</p> : null}
+                </div>
+                )}
+                {details?.mediaType === 'series' ? (
+                  <div className="title-seasons-panel">
+                    <div className="title-seasons-header">
+                      <div
+                        className="title-season-strip"
+                      >
+                        {hasPreviousSeason ? (
+                          <button
+                            aria-label="Previous season"
+                            className="title-season-nav"
+                            onClick={() => changeSeason(-1)}
+                            type="button"
+                          />
+                        ) : null}
+                        {details.seasons.length ? (
+                          <label className="title-season-selector">
+                            <span className="title-season-kicker">Season</span>
+                            <select
+                              className="title-season-select"
+                              onChange={(event) => handleSeasonSelectChange(event.target.value)}
+                              value={seasonValue}
+                            >
+                              {details.seasons.map((season) => (
+                                <option key={season.id} value={season.id}>
+                                  {season.title}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                        <div className="title-season-divider" aria-hidden="true" />
+                        <div className="title-season-badge">
+                          <strong>{activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length}</strong>
+                          <span>{(activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
+                        </div>
+                          {shouldShowDownloadSeasonAction || canDeleteSeasonAction ? (
                             <div className="title-season-actions">
-                              {canDownloadSeasonAction || activeSeasonMeta?.isDownloading ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
-                              {canDownloadSeasonAction || activeSeasonMeta?.isDownloading ? (
+                              {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
+                              {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? (
                                 activeSeasonDownloadStatus === 'downloading' ? (
                                   <div
                                     aria-label="Season downloading"
-                                    className="title-season-progress"
-                                    role="img"
-                                    title={activeSeasonMeta?.downloadLabel || 'Downloading'}
-                                  >
+                                      className="title-season-progress"
+                                      role="img"
+                                      title={activeSeasonMeta?.downloadLabel || 'Downloading'}
+                                    >
+                                      <div
+                                        className="title-season-progress-bar"
+                                        style={{ width: `${activeSeasonMeta?.downloadProgress || 0}%` }}
+                                      />
+                                    </div>
+                                  ) : activeSeasonDownloadStatus === 'processing' ? (
                                     <div
-                                      className="title-season-progress-bar"
-                                      style={{ width: `${activeSeasonMeta?.downloadProgress || 0}%` }}
-                                    />
-                                  </div>
-                                ) : activeSeasonDownloadStatus === 'processing' ? (
-                                  <div
-                                    aria-label="Season processing"
-                                    className="title-season-processing"
-                                    role="img"
-                                    title={activeSeasonMeta?.downloadLabel || 'Processing'}
-                                  >
-                                    <span className="title-season-processing-spinner" aria-hidden="true" />
-                                  </div>
-                                ) : (
+                                      aria-label="Season processing"
+                                      className="title-season-processing"
+                                      role="img"
+                                      title={activeSeasonMeta?.downloadLabel || 'Processing'}
+                                    >
+                                      <span className="title-season-processing-spinner" aria-hidden="true" />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      aria-label="Download season"
+                                      className="title-season-action"
+                                      disabled={seasonActionBusy === 'download'}
+                                      onClick={() => void handleSeasonDownload()}
+                                      type="button"
+                                    >
+                                      <DownloadGlyph />
+                                    </button>
+                                  )
+                                ) : null}
+                                {canDeleteSeasonAction ? (
+                                  <div className="title-season-divider title-season-action-divider" aria-hidden="true" />
+                                ) : null}
+                                {canDeleteSeasonAction ? (
                                   <button
-                                    aria-label="Download season"
-                                    className="title-season-action"
-                                    disabled={seasonActionBusy === 'download'}
-                                    onClick={() => void handleSeasonDownload()}
+                                    aria-label="Delete season files"
+                                    className="title-season-action title-season-action-delete"
+                                    disabled={seasonActionBusy === 'delete'}
+                                    onClick={() => void handleSeasonDelete()}
                                     type="button"
                                   >
-                                    <DownloadGlyph />
+                                    <TrashGlyph />
                                   </button>
-                                )
-                              ) : null}
-                              {canDeleteSeasonAction ? (
-                                <div className="title-season-divider title-season-action-divider" aria-hidden="true" />
-                              ) : null}
-                              {canDeleteSeasonAction ? (
-                                <button
-                                  aria-label="Delete season files"
-                                  className="title-season-action title-season-action-delete"
-                                  disabled={seasonActionBusy === 'delete'}
-                                  onClick={() => void handleSeasonDelete()}
-                                  type="button"
-                                >
-                                  <TrashGlyph />
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                      {hasNextSeason ? (
+                                ) : null}
+                              </div>
+                            ) : null}
+                        {hasNextSeason ? (
+                          <button
+                            aria-label="Next season"
+                            className="title-season-nav next"
+                            onClick={() => changeSeason(1)}
+                            type="button"
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                      <div
+                        className={[
+                          'episode-dock',
+                          episodeScrollState.canScrollLeft ? 'show-left-fade' : '',
+                          episodeScrollState.canScrollRight ? 'show-right-fade' : '',
+                        ].filter(Boolean).join(' ')}
+                      >
+                      {episodeScrollState.canScrollLeft ? (
                         <button
-                          aria-label="Next season"
-                          className="title-season-nav next"
-                          onClick={() => changeSeason(1)}
+                          aria-label="Scroll episodes left"
+                          className="episode-dock-arrow left"
+                          onClick={() => scrollEpisodes('left')}
                           type="button"
                         />
                       ) : null}
+                      {episodeScrollState.canScrollRight ? (
+                        <button
+                          aria-label="Scroll episodes right"
+                          className="episode-dock-arrow right"
+                          onClick={() => scrollEpisodes('right')}
+                          type="button"
+                        />
+                      ) : null}
+                      <div
+                        className="episode-list"
+                        ref={episodeListRef}
+                      >
+                        {visibleEpisodes.map((episode) => (
+                          <div
+                            className={[
+                              'episode-card',
+                              episode.id === details.playTargetId ? 'is-next-up' : '',
+                              episode.id === playerTarget?.id ? 'is-playing' : '',
+                              episode.id === details.playTargetId && episode.id === playerTarget?.id ? 'is-playing-next-up' : '',
+                              episode.progress && !episode.watched ? 'has-progress' : '',
+                              episode.canDownload ? 'is-downloadable' : '',
+                              episode.availability === 'downloading' ? 'is-downloading' : '',
+                              !episode.availableInJellyfin ? 'is-unavailable' : '',
+                            ].filter(Boolean).join(' ')}
+                            data-episode-id={episode.id}
+                            data-season-id={episode.seasonId}
+                            key={`${episode.seasonId}-${episode.id}`}
+                            onClick={() => {
+                              if (!episode.availableInJellyfin) {
+                                return
+                              }
+                              setPlayerTarget({ id: episode.id, title: episode.title })
+                            }}
+                            onKeyDown={(event) => {
+                              if (!episode.availableInJellyfin) {
+                                return
+                              }
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                setPlayerTarget({ id: episode.id, title: episode.title })
+                              }
+                            }}
+                            role={episode.availableInJellyfin ? 'button' : undefined}
+                            tabIndex={episode.availableInJellyfin ? 0 : -1}
+                          >
+                            <div className="episode-card-art">
+                              {episode.progress && !episode.watched ? (
+                                <div className="episode-card-progress" aria-hidden="true">
+                                  <div className="episode-card-progress-bar" style={{ width: `${episode.progress}%` }} />
+                                </div>
+                              ) : null}
+                              {episode.progress && !episode.watched ? <div className="episode-card-progress-glow" aria-hidden="true" /> : null}
+                              {episode.imageUrl ? <img alt={episode.title} loading="lazy" src={episode.imageUrl} /> : <div className="media-fallback" />}
+                            </div>
+                            <div className="episode-card-copy">
+                              <div className="episode-card-title-row">
+                                <strong>{episode.title}</strong>
+                                <div className="episode-card-state-icons">
+                                  {episode.canDownload || episode.availability === 'downloading' ? (
+                                    <span
+                                      aria-label={episode.availability === 'downloading' ? 'Episode downloading' : 'Episode available to download'}
+                                      className={episode.availability === 'downloading' ? 'episode-card-availability is-downloading' : 'episode-card-availability'}
+                                      title={episode.availability === 'downloading' ? 'Downloading' : 'Available to download'}
+                                    >
+                                      <DownloadGlyph />
+                                    </span>
+                                  ) : null}
+                                  {episode.availableInJellyfin ? (
+                                    <button
+                                      aria-label={episode.watched ? 'Mark episode as unwatched' : 'Mark episode as watched'}
+                                      className={episode.watched ? 'episode-card-watch-toggle is-watched' : 'episode-card-watch-toggle'}
+                                      disabled={episodeWatchBusyId === episode.id}
+                                      onClick={(event) => handleEpisodeWatchToggle(
+                                        event,
+                                        episode.id,
+                                        episode.watched,
+                                        episode.progress,
+                                        episode.playbackPositionTicks
+                                      )}
+                                      type="button"
+                                    >
+                                      <CheckGlyph />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <span>{formatEpisodeMeta(episode.subtitle)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                    <div
-                      className={[
-                        'episode-dock',
-                        episodeScrollState.canScrollLeft ? 'show-left-fade' : '',
-                        episodeScrollState.canScrollRight ? 'show-right-fade' : '',
-                      ].filter(Boolean).join(' ')}
-                    >
-                    {episodeScrollState.canScrollLeft ? (
-                      <button
-                        aria-label="Scroll episodes left"
-                        className="episode-dock-arrow left"
-                        onClick={() => scrollEpisodes('left')}
-                        type="button"
-                      />
-                    ) : null}
-                    {episodeScrollState.canScrollRight ? (
-                      <button
-                        aria-label="Scroll episodes right"
-                        className="episode-dock-arrow right"
-                        onClick={() => scrollEpisodes('right')}
-                        type="button"
-                      />
-                    ) : null}
-                    <div
-                      className="episode-list"
-                      ref={episodeListRef}
-                    >
-                      {visibleEpisodes.map((episode) => (
-                        <div
-                          className={[
-                            'episode-card',
-                            episode.id === details.playTargetId ? 'is-next-up' : '',
-                            episode.id === playerTarget?.id ? 'is-playing' : '',
-                            episode.id === details.playTargetId && episode.id === playerTarget?.id ? 'is-playing-next-up' : '',
-                            episode.progress && !episode.watched ? 'has-progress' : '',
-                            episode.canDownload ? 'is-downloadable' : '',
-                            episode.availability === 'downloading' ? 'is-downloading' : '',
-                            !episode.availableInJellyfin ? 'is-unavailable' : '',
-                          ].filter(Boolean).join(' ')}
-                          data-episode-id={episode.id}
-                          data-season-id={episode.seasonId}
-                          key={`${episode.seasonId}-${episode.id}`}
-                          onClick={() => {
-                            if (!episode.availableInJellyfin) {
-                              return
-                            }
-                            setPlayerTarget({ id: episode.id, title: episode.title })
-                          }}
-                          onKeyDown={(event) => {
-                            if (!episode.availableInJellyfin) {
-                              return
-                            }
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault()
-                              setPlayerTarget({ id: episode.id, title: episode.title })
-                            }
-                          }}
-                          role={episode.availableInJellyfin ? 'button' : undefined}
-                          tabIndex={episode.availableInJellyfin ? 0 : -1}
-                        >
-                          <div className="episode-card-art">
-                            {episode.progress && !episode.watched ? (
-                              <div className="episode-card-progress" aria-hidden="true">
-                                <div className="episode-card-progress-bar" style={{ width: `${episode.progress}%` }} />
-                              </div>
-                            ) : null}
-                            {episode.progress && !episode.watched ? <div className="episode-card-progress-glow" aria-hidden="true" /> : null}
-                            {episode.imageUrl ? <img alt={episode.title} loading="lazy" src={episode.imageUrl} /> : <div className="media-fallback" />}
-                          </div>
-                          <div className="episode-card-copy">
-                            <div className="episode-card-title-row">
-                              <strong>{episode.title}</strong>
-                              <div className="episode-card-state-icons">
-                                {episode.canDownload || episode.availability === 'downloading' ? (
-                                  <span
-                                    aria-label={episode.availability === 'downloading' ? 'Episode downloading' : 'Episode available to download'}
-                                    className={episode.availability === 'downloading' ? 'episode-card-availability is-downloading' : 'episode-card-availability'}
-                                    title={episode.availability === 'downloading' ? 'Downloading' : 'Available to download'}
-                                  >
-                                    <DownloadGlyph />
-                                  </span>
-                                ) : null}
-                                {episode.availableInJellyfin ? (
-                                  <button
-                                    aria-label={episode.watched ? 'Mark episode as unwatched' : 'Mark episode as watched'}
-                                    className={episode.watched ? 'episode-card-watch-toggle is-watched' : 'episode-card-watch-toggle'}
-                                    disabled={episodeWatchBusyId === episode.id}
-                                    onClick={(event) => handleEpisodeWatchToggle(
-                                      event,
-                                      episode.id,
-                                      episode.watched,
-                                      episode.progress,
-                                      episode.playbackPositionTicks
-                                    )}
-                                    type="button"
-                                  >
-                                    <CheckGlyph />
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                            <span>{formatEpisodeMeta(episode.subtitle)}</span>
-                          </div>
-                        </div>
+                ) : null}
+                {details?.cast.length && details.mediaType === 'movie' ? (
+                  <div className="title-cast-panel title-cast-panel-inline">
+                    <div className="title-cast-header">
+                      <h3>Cast & Crew</h3>
+                    </div>
+                    <div className="title-cast-list">
+                      {details.cast.map((member) => (
+                        <CastCard key={member.id} member={member} />
                       ))}
                     </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
           </div>
+          {details?.cast.length && details.mediaType === 'series' && !(playerTarget && jellyfinPlayerUrl) ? (
+            <div className="title-cast-shell">
+              <div className="title-cast-panel">
+                <div className="title-cast-header">
+                  <h3>Cast & Crew</h3>
+                </div>
+                <div className="title-cast-list">
+                  {details.cast.map((member) => (
+                    <CastCard key={member.id} member={member} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1788,6 +1818,20 @@ function captureOriginRect(element: HTMLElement): ModalOriginRect {
     width: rect.width,
     height: rect.height,
   }
+}
+
+function CastCard(props: { member: TitleDetailsCastMember }) {
+  return (
+    <article className="cast-card">
+      <div className="cast-card-art">
+        {props.member.imageUrl ? <img alt={props.member.name} loading="lazy" src={props.member.imageUrl} /> : <div className="cast-card-fallback">{props.member.name.slice(0, 1).toUpperCase()}</div>}
+      </div>
+      <div className="cast-card-copy">
+        <strong>{props.member.name}</strong>
+        {props.member.role ? <span>{props.member.role}</span> : null}
+      </div>
+    </article>
+  )
 }
 
 function PlayGlyph() {

@@ -142,6 +142,13 @@ export interface TitleDetailsSeason {
   downloadLabel?: string;
 }
 
+export interface TitleDetailsCastMember {
+  id: string;
+  name: string;
+  role: string;
+  imageUrl: string;
+}
+
 export interface TitleDetailsResponse {
   id: string;
   tmdbId?: number;
@@ -159,6 +166,7 @@ export interface TitleDetailsResponse {
   selectedSeasonId?: string;
   seasons: TitleDetailsSeason[];
   episodes: TitleDetailsEpisode[];
+  cast: TitleDetailsCastMember[];
 }
 
 export interface DownloadItem {

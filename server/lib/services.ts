@@ -14,7 +14,8 @@ import type {
   TitleDetailsEpisode,
   TitleDetailsRequest,
   TitleDetailsResponse,
-  TitleDetailsSeason
+  TitleDetailsSeason,
+  TitleDetailsCastMember
 } from '../../shared/contracts.js';
 
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
@@ -458,6 +459,7 @@ export async function getTitleDetails(
   const effectiveBackdropUrl = backdropUrl || resolveBackdrop(seriesItem || item, card);
 
   if (!isSeries) {
+    const movieDetails = tmdbId ? await getTmdbMovieSummary(config, tmdbId) : null;
     return {
       id: card.id,
       tmdbId,
@@ -472,7 +474,8 @@ export async function getTitleDetails(
       backdropUrl: effectiveBackdropUrl,
       logoUrl: logoUrl || card.logoUrl,
       seasons: [],
-      episodes: []
+      episodes: [],
+      cast: buildTitleCast(movieDetails, 'movie')
     };
   }
 
@@ -527,8 +530,40 @@ export async function getTitleDetails(
     logoUrl: logoUrl || card.logoUrl,
     selectedSeasonId: selectedSeason?.id,
     seasons,
-    episodes
+    episodes,
+    cast: buildTitleCast(tmdbSeries, 'series')
   };
+}
+
+function buildTitleCast(
+  tmdbPayload: Record<string, unknown> | null,
+  mediaType: 'movie' | 'series'
+): TitleDetailsCastMember[] {
+  const creditsKey = mediaType === 'series' ? 'aggregate_credits' : 'credits';
+  const castEntries = asArray(asRecord(tmdbPayload?.[creditsKey])?.cast)
+    .map((entry) => asRecord(entry))
+    .slice(0, 20);
+
+  return castEntries.map((entry) => ({
+    id: String(entry.id || ''),
+    name: String(entry.name || ''),
+    role: String(
+      entry.character
+      || asArray(entry.roles).map((role) => String(asRecord(role).character || '')).find(Boolean)
+      || entry.known_for_department
+      || ''
+    ),
+    imageUrl: typeof entry.profile_path === 'string' && entry.profile_path
+      ? `${TMDB_IMAGE}/w342${entry.profile_path}`
+      : ''
+  })).filter((member) => Boolean(member.id && member.name));
+}
+
+async function getTmdbMovieSummary(config: AppConfig, tmdbId: number): Promise<Record<string, unknown> | null> {
+  return tmdbFetch(
+    config,
+    `/movie/${tmdbId}?append_to_response=credits,images&language=${encodeURIComponent(config.preferences.language)}`
+  );
 }
 
 async function enrichDownloadItem(
@@ -789,7 +824,7 @@ async function getPreferredTitleLogo(
 async function getTmdbSeriesSummary(config: AppConfig, tmdbId: number): Promise<Record<string, unknown> | null> {
   return tmdbFetch(
     config,
-    `/tv/${tmdbId}?append_to_response=external_ids&language=${encodeURIComponent(config.preferences.language)}`
+    `/tv/${tmdbId}?append_to_response=external_ids,aggregate_credits&language=${encodeURIComponent(config.preferences.language)}`
   );
 }
 
