@@ -959,19 +959,82 @@ img {
   right: 1.5rem;
 }
 
-.title-player-view {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: #05070b;
-}
-
 .title-player-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   padding: 1.25rem 1.5rem 0;
+}
+
+.title-player-topbar-embedded {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 2.35rem minmax(0, 1fr) 2.35rem;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 0 0.9rem;
+}
+
+.title-player-topbar-brand {
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+}
+
+.title-player-topbar-logo {
+  display: block;
+  width: auto;
+  max-width: min(14rem, 42vw);
+  max-height: 2rem;
+  object-fit: contain;
+  object-position: center;
+}
+
+.title-player-topbar-title {
+  display: block;
+  max-width: min(14rem, 42vw);
+  overflow: hidden;
+  color: rgba(238, 244, 255, 0.9);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-player-inline-control {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(6, 8, 14, 0.72);
+  color: #eef4ff;
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+
+.title-player-inline-control:hover,
+.title-player-inline-control:focus-visible {
+  background: rgba(14, 18, 28, 0.88);
+  transform: translateY(-1px);
+}
+
+.title-player-inline-control .title-action-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.title-player-inline-close {
+  font-size: 1.45rem;
+  line-height: 1;
+  text-indent: 0.06rem;
+  padding-bottom: 0.06rem;
 }
 
 .title-player-frame {
@@ -981,10 +1044,27 @@ img {
   background: #000;
 }
 
-.player-backdrop {
-  padding: 0;
+.title-embedded-player {
+  position: relative;
+  margin-top: 1.6rem;
+  padding: 0 1.5rem;
+}
+
+.title-player-frame-shell {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 1.3rem;
+  overflow: hidden;
+  box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.34);
   background: #000;
-  backdrop-filter: none;
+}
+
+.title-player-frame-embedded {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
 }
 
 .title-details-modal {
@@ -1049,6 +1129,13 @@ img {
   position: relative;
   z-index: 0;
   height: 100%;
+}
+
+.title-details-modal-content.has-embedded-player {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .title-details-modal-transition .title-details-modal-content {
@@ -1194,6 +1281,18 @@ img {
   background: linear-gradient(180deg, rgba(9, 11, 16, 0) 0%, rgba(9, 11, 16, 0.015) 12%, rgba(9, 11, 16, 0.04) 28%, rgba(9, 11, 16, 0.08) 44%, rgba(9, 11, 16, 0.16) 60%, rgba(9, 11, 16, 0.28) 74%, rgba(9, 11, 16, 0.46) 88%, #090b10 100%);
 }
 
+.title-details-body.has-embedded-player {
+  min-height: 0;
+  align-items: stretch;
+  overflow: visible;
+  padding-top: 0;
+  background: #090b10;
+}
+
+.title-details-body.has-embedded-player::before {
+  display: none;
+}
+
 .title-details-body::before {
   content: "";
   position: absolute;
@@ -1213,6 +1312,12 @@ img {
   width: min(100%, 84rem);
   min-height: 100%;
   padding-top: 12rem;
+}
+
+.title-details-body.has-embedded-player .title-details-shell {
+  align-content: start;
+  min-height: 0;
+  padding-top: 1rem;
 }
 
 .title-details-summary {
@@ -1271,6 +1376,10 @@ img {
   gap: 1.3rem;
 }
 
+.title-details-body.has-embedded-player .title-seasons-panel {
+  align-content: start;
+}
+
 .title-seasons-header {
   padding: 0.35rem 0 0.15rem;
 }
@@ -1278,6 +1387,7 @@ img {
 .title-season-strip {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.8rem;
   min-height: 0;
   padding: 0;
@@ -1401,6 +1511,95 @@ img {
   text-transform: uppercase;
 }
 
+.title-season-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.title-season-action-divider {
+  margin-left: 0.16rem;
+  margin-right: 0.16rem;
+}
+
+.title-season-action {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0.18rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(237, 242, 255, 0.82);
+  transition: color 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+
+.title-season-action .title-action-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.title-season-action:hover,
+.title-season-action:focus-visible {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.title-season-action.is-danger {
+  color: #ffdbdb;
+}
+
+.title-season-action-delete {
+  color: rgba(237, 242, 255, 0.72);
+}
+
+.title-season-action-delete:hover,
+.title-season-action-delete:focus-visible {
+  color: rgba(244, 247, 255, 0.92);
+}
+
+.title-season-processing,
+.title-season-progress {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2rem;
+  min-height: 1.9rem;
+}
+
+.title-season-processing-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  animation: episodeDockSpinner 720ms linear infinite;
+}
+
+.title-season-progress {
+  width: 2.5rem;
+}
+
+.title-season-progress::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.title-season-progress-bar {
+  position: absolute;
+  left: 0;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: #e50914;
+}
+
 .episode-dock {
   position: relative;
   border-radius: 2rem;
@@ -1458,12 +1657,16 @@ img {
   flex-shrink: 0;
   padding: 0;
   border: 0;
-  border-radius: 1rem;
   background: transparent;
   color: inherit;
   text-align: left;
   overflow: visible;
+  cursor: pointer;
   transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.episode-card.is-unavailable {
+  cursor: default;
 }
 
 .episode-dock-arrow {
@@ -1545,6 +1748,11 @@ img {
   transform: translateY(-0.22rem);
 }
 
+.episode-card.is-unavailable:hover,
+.episode-card.is-unavailable:focus-visible {
+  transform: none;
+}
+
 .episode-card-art {
   position: relative;
   overflow: hidden;
@@ -1562,28 +1770,103 @@ img {
   inset: 0;
   z-index: 3;
   border-radius: inherit;
-  padding: 2px;
-  background: linear-gradient(90deg, #68abff, #ffd166);
-  opacity: 0;
+  padding: var(--episode-border-width, 2px);
+  background: var(--episode-border-gradient, linear-gradient(90deg, #68abff, #ffd166));
+  opacity: var(--episode-border-opacity, 0);
   pointer-events: none;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
+  box-shadow: var(--episode-border-shadow, none);
+  transition: padding 220ms ease, opacity 220ms ease, background 220ms ease, box-shadow 220ms ease;
 }
 
-.episode-card.is-next-up .episode-card-art::before {
-  opacity: 1;
+.episode-card.is-next-up {
+  --episode-border-opacity: 1;
+  --episode-border-width: 2px;
+  --episode-border-gradient: linear-gradient(90deg, #68abff, #ffd166);
 }
 
-.episode-card.is-next-up.has-progress .episode-card-art::before {
+.episode-card.is-playing {
+  --episode-border-opacity: 1;
+  --episode-border-width: 4px;
+  --episode-border-gradient: linear-gradient(90deg, #79b8ff, #9f8cff);
+  --episode-border-shadow: 0 0 1.15rem rgba(121, 184, 255, 0.22);
+}
+
+.episode-card.is-playing-next-up .episode-card-art::before {
+  animation: playingNextUpBorderPulse 220ms ease-out 1 both;
+}
+
+.episode-card.is-playing-next-up.has-progress::after {
+  animation: playingNextUpBorderJoinPulse 220ms ease-out 1 both;
+}
+
+.episode-card.is-next-up.has-progress::after,
+.episode-card.is-playing.has-progress::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 7%;
+  min-width: 1.05rem;
+  height: 2px;
+  border-bottom-left-radius: 999px;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.episode-card.is-next-up.has-progress::after {
+  color: #68abff;
+}
+
+.episode-card.is-playing.has-progress::after {
+  color: #79b8ff;
+  height: 4px;
+}
+
+.episode-card.is-next-up.has-progress .episode-card-art::before,
+.episode-card.is-playing.has-progress .episode-card-art::before {
   inset: 0;
-  padding: 2px 2px 0;
+  padding: var(--episode-border-width, 2px) var(--episode-border-width, 2px) 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   box-shadow: none;
+}
+
+@keyframes playingNextUpBorderPulse {
+  0% {
+    padding: 2px;
+    background: linear-gradient(90deg, #68abff, #ffd166);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+
+  100% {
+    padding: 4px;
+    background: linear-gradient(90deg, #79b8ff, #9f8cff);
+    box-shadow: 0 0 1.15rem rgba(121, 184, 255, 0.22);
+  }
+}
+
+@keyframes playingNextUpBorderJoinPulse {
+  0% {
+    background: #68abff;
+    height: 2px;
+  }
+
+  100% {
+    background: #79b8ff;
+    height: 4px;
+  }
+}
+
+.episode-image-shell {
+  width: 100%;
+  height: 100%;
 }
 
 .episode-card-art img {
@@ -1634,6 +1917,24 @@ img {
   align-items: center;
   gap: 0.42rem;
   flex: 0 0 auto;
+}
+
+.episode-card-availability {
+  display: inline-grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  color: rgba(255, 255, 255, 0.78);
+  opacity: 0.88;
+}
+
+.episode-card-availability .title-action-icon {
+  width: 0.98rem;
+  height: 0.98rem;
+}
+
+.episode-card-availability.is-downloading {
+  animation: episodeCardAvailabilityPulse 900ms ease-in-out infinite alternate;
 }
 
 .episode-card-watch-toggle svg {
@@ -1727,6 +2028,23 @@ img {
 .episode-card-copy span {
   color: #c7cede;
   font-size: 0.83rem;
+}
+
+.episode-card.is-downloadable .episode-card-copy strong,
+.episode-card.is-downloading .episode-card-copy strong {
+  color: #f4f7ff;
+}
+
+@keyframes episodeCardAvailabilityPulse {
+  from {
+    opacity: 0.5;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
 }
 
 .title-modal-grid {
