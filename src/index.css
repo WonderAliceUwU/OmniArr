@@ -52,6 +52,52 @@ img {
   overflow: hidden;
 }
 
+.entry-stage-shell {
+  position: relative;
+  min-height: 100vh;
+}
+
+.entry-stage-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(115deg, transparent 18%, rgba(255, 209, 102, 0.12) 48%, rgba(104, 171, 255, 0.16) 62%, transparent 82%);
+  mix-blend-mode: screen;
+}
+
+.entry-stage-shell.is-forward-exit,
+.entry-stage-shell.is-back-exit,
+.entry-stage-shell.is-forward-enter,
+.entry-stage-shell.is-back-enter {
+  overflow: hidden;
+}
+
+.entry-stage-shell.is-forward-exit {
+  animation: entryStageForwardExit 240ms cubic-bezier(0.32, 0.9, 0.42, 1) both;
+}
+
+.entry-stage-shell.is-forward-exit::after,
+.entry-stage-shell.is-back-exit::after,
+.entry-stage-shell.is-forward-enter::after,
+.entry-stage-shell.is-back-enter::after {
+  animation: entryStageSweep 520ms ease both;
+}
+
+.entry-stage-shell.is-forward-enter {
+  animation: entryStageForwardEnter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entry-stage-shell.is-back-exit {
+  animation: entryStageBackExit 240ms cubic-bezier(0.32, 0.9, 0.42, 1) both;
+}
+
+.entry-stage-shell.is-back-enter {
+  animation: entryStageBackEnter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .reiverr-sidebar {
   position: fixed;
   inset: 0 auto 0 0;
@@ -746,6 +792,7 @@ img {
   pointer-events: none;
 }
 
+.continue-tile.has-progress .media-art::after,
 .continue-tile:hover .media-art::after,
 .continue-tile:focus-within .media-art::after {
   opacity: 1;
@@ -753,6 +800,54 @@ img {
 
 .media-trigger:hover .media-hover-label,
 .media-trigger:focus-visible .media-hover-label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.continue-episode-meta {
+  position: absolute;
+  left: 0.85rem;
+  bottom: 1.05rem;
+  z-index: 2;
+  display: grid;
+  gap: 0.18rem;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(0.45rem);
+  text-shadow:
+    0 0.18rem 0.8rem rgba(0, 0, 0, 0.78),
+    0 0.04rem 0.12rem rgba(0, 0, 0, 0.7);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.continue-tile.has-progress .continue-episode-meta {
+  bottom: 1.45rem;
+}
+
+.continue-episode-meta-primary {
+  color: #eef4ff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1.1;
+}
+
+.continue-episode-meta-secondary {
+  color: rgba(226, 234, 247, 0.86);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.continue-tile .media-hover-label {
+  bottom: 3.55rem;
+}
+
+.continue-tile:hover .continue-episode-meta,
+.continue-tile:focus-within .continue-episode-meta {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1798,34 +1893,6 @@ img {
   animation: playingNextUpBorderPulse 220ms ease-out 1 both;
 }
 
-.episode-card.is-playing-next-up.has-progress::after {
-  animation: playingNextUpBorderJoinPulse 220ms ease-out 1 both;
-}
-
-.episode-card.is-next-up.has-progress::after,
-.episode-card.is-playing.has-progress::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  z-index: 3;
-  width: 7%;
-  min-width: 1.05rem;
-  height: 2px;
-  border-bottom-left-radius: 999px;
-  background: currentColor;
-  pointer-events: none;
-}
-
-.episode-card.is-next-up.has-progress::after {
-  color: #68abff;
-}
-
-.episode-card.is-playing.has-progress::after {
-  color: #79b8ff;
-  height: 4px;
-}
-
 .episode-card.is-next-up.has-progress .episode-card-art::before,
 .episode-card.is-playing.has-progress .episode-card-art::before {
   inset: 0;
@@ -1849,18 +1916,6 @@ img {
     padding: 4px;
     background: linear-gradient(90deg, #79b8ff, #9f8cff);
     box-shadow: 0 0 1.15rem rgba(121, 184, 255, 0.22);
-  }
-}
-
-@keyframes playingNextUpBorderJoinPulse {
-  0% {
-    background: #68abff;
-    height: 2px;
-  }
-
-  100% {
-    background: #79b8ff;
-    height: 4px;
   }
 }
 
@@ -2349,6 +2404,17 @@ img {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  background:
+    radial-gradient(circle at top left, rgba(104, 171, 255, 0.18), transparent 32%),
+    linear-gradient(180deg, #05070b, #090c12 42%, #06080d 100%);
+}
+
+.auth-layout-login {
+  position: relative;
+  grid-template-columns: minmax(0, 34rem);
+  justify-content: center;
+  align-content: center;
+  padding: 2rem;
 }
 
 .auth-panel,
@@ -2362,9 +2428,35 @@ img {
   gap: 1.25rem;
 }
 
+.auth-panel-login {
+  position: relative;
+  z-index: 1;
+  min-height: auto;
+  padding: 0;
+}
+
+.auth-panel-shell {
+  display: grid;
+  gap: 1rem;
+}
+
 .auth-copy {
   margin: 0;
   color: #adbfd8;
+}
+
+.auth-form-card {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.25rem;
+  padding: 1.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.35rem;
+  background: rgba(9, 12, 18, 0.74);
+  box-shadow:
+    0 1.4rem 3rem rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(18px);
 }
 
 .auth-form {
@@ -2383,6 +2475,15 @@ img {
   background:
     linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.7)),
     url('/reiverr/server-wallpaper.png') center/cover no-repeat;
+}
+
+.auth-visual-login {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  padding: 0;
+  opacity: 0.6;
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.88) 18%, #000 100%);
 }
 
 .glass-card {
@@ -2513,6 +2614,78 @@ img {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+@keyframes entryStageForwardExit {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.975) translateX(-2.2rem);
+    filter: blur(14px);
+  }
+}
+
+@keyframes entryStageForwardEnter {
+  0% {
+    opacity: 0;
+    transform: scale(1.03) translateX(3.6rem);
+    filter: blur(16px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes entryStageBackExit {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.982) translateX(2.2rem);
+    filter: blur(12px);
+  }
+}
+
+@keyframes entryStageBackEnter {
+  0% {
+    opacity: 0;
+    transform: scale(1.02) translateX(-3.2rem);
+    filter: blur(16px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes entryStageSweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-18%);
+  }
+
+  24% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(18%);
+  }
 }
 
 @media (max-width: 980px) {
