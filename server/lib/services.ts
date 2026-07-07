@@ -443,7 +443,8 @@ export async function getTitleDetails(
   const primaryItem = seriesItem || item;
   const isSeries = card.mediaType === 'series' || card.mediaType === 'tv' || seriesItem?.Type === 'Series' || item?.Type === 'Episode';
   const detailMediaType: 'movie' | 'tv' = primaryItem?.Type === 'Movie' || card.mediaType === 'movie' ? 'movie' : 'tv';
-  const tmdbId = Number(primaryItem?.ProviderIds?.Tmdb) || card.tmdbId;
+  const tvdbId = Number(primaryItem?.ProviderIds?.Tvdb) || undefined;
+  const tmdbId = Number(primaryItem?.ProviderIds?.Tmdb) || card.tmdbId || await resolveTmdbSeriesIdByTvdbId(config, tvdbId);
   const originalLanguage = card.originalLanguage;
   const [backdropUrl, logoUrl] = await Promise.all([
     tmdbId ? getTmdbHighResBackdrop(config, tmdbId, detailMediaType, null, originalLanguage) : Promise.resolve(''),
@@ -792,6 +793,24 @@ async function getTmdbSeriesSummary(config: AppConfig, tmdbId: number): Promise<
   );
 }
 
+async function resolveTmdbSeriesIdByTvdbId(config: AppConfig, tvdbId?: number): Promise<number | undefined> {
+  if (!tvdbId) {
+    return undefined;
+  }
+
+  try {
+    const response = await tmdbFetch(
+      config,
+      `/find/${encodeURIComponent(String(tvdbId))}?external_source=tvdb_id`
+    );
+    const firstMatch = asArray(response?.tv_results)[0];
+    const id = Number(asRecord(firstMatch).id || 0);
+    return id || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function getJellyfinSeriesSeasons(config: AppConfig, seriesId: string): Promise<SeriesSeasonDescriptor[]> {
   try {
     const seasons = await jellyfinFetch<JellyfinItem[]>(
@@ -871,7 +890,7 @@ async function getTmdbSeasonEpisodes(
 ): Promise<TmdbEpisodeRecord[]> {
   const response = await tmdbFetch(
     config,
-    `/tv/${tmdbId}/season/${seasonNumber}?language=${encodeURIComponent(config.preferences.language)}`
+    `/tv/${tmdbId}/season/${seasonNumber}`
   );
 
   return asArray(response?.episodes)
@@ -1259,7 +1278,7 @@ function mapJellyfinEpisode(episode: JellyfinItem): TitleDetailsEpisode {
       typeof episode.ParentIndexNumber === 'number' ? `Season ${episode.ParentIndexNumber}` : '',
       typeof episode.IndexNumber === 'number' ? `Episode ${episode.IndexNumber}` : ''
     ].filter(Boolean).join(', '),
-    imageUrl: buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag),
+    imageUrl: imageTag ? buildJellyfinAssetUrl(String(episode.Id), 'Primary', 960, imageTag) : '',
     seasonNumber: episode.ParentIndexNumber,
     episodeNumber: episode.IndexNumber,
     runtimeMinutes: episode.RunTimeTicks ? Math.max(1, Math.round(episode.RunTimeTicks / 600000000)) : undefined,
@@ -1505,7 +1524,7 @@ async function getLibrarySnapshot(config: AppConfig): Promise<{
       .map((item) => [String(item.Id), Number(item.ProviderIds?.Tmdb) || undefined] as const)
   );
 
-  const continueWatching = [...resume, ...nextUp]
+  const continueWatching = dedupeContinueWatchingItems([...resume, ...nextUp])
     .slice(0, 12)
     .map((item) => jellyfinToCard(item, item.SeriesName || item.Name || 'Continue watching', tmdbIdByItemId))
     .filter(Boolean) as MediaCard[];
@@ -1525,6 +1544,34 @@ async function getLibrarySnapshot(config: AppConfig): Promise<{
     recentlyAdded,
     allItems
   };
+}
+
+function dedupeContinueWatchingItems(items: JellyfinItem[]): JellyfinItem[] {
+  const seen = new Set<string>();
+  const deduped: JellyfinItem[] = [];
+
+  for (const item of items) {
+    const key = getContinueWatchingKey(item);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
+}
+
+function getContinueWatchingKey(item: JellyfinItem): string {
+  if (item.Type === 'Episode') {
+    const seriesKey = item.SeriesId || item.SeriesName || item.Id || 'series';
+    const seasonKey = typeof item.ParentIndexNumber === 'number' ? item.ParentIndexNumber : 'x';
+    const episodeKey = typeof item.IndexNumber === 'number' ? item.IndexNumber : item.Id || 'x';
+    return `episode:${seriesKey}:${seasonKey}:${episodeKey}`;
+  }
+
+  return `${item.Type || 'item'}:${item.Id || item.Name || 'unknown'}`;
 }
 
 async function buildHubSections(

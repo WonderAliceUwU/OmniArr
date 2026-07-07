@@ -26,6 +26,7 @@ import {
 
 type AuthState = 'loading' | 'setup' | 'login' | 'app'
 type EntryStage = 'onboarding' | 'profiles' | 'dashboard'
+type EntryTransitionState = 'idle' | 'forward-enter' | 'forward-exit' | 'back-enter' | 'back-exit'
 const MAX_CACHED_HUB_PAGES = 3
 type ModalOriginRect = { left: number; top: number; width: number; height: number }
 type SelectedCardState = { card: MediaCard; originRect: ModalOriginRect | null }
@@ -73,6 +74,29 @@ function App() {
   const [hubLoading, setHubLoading] = useState(false)
   const [selectedCard, setSelectedCard] = useState<SelectedCardState | null>(null)
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
+  const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
+
+  async function transitionEntryStage(nextStage: EntryStage) {
+    if (nextStage === entryStage) {
+      return
+    }
+
+    const isProfileDashboardSwitch
+      = (entryStage === 'profiles' && nextStage === 'dashboard')
+      || (entryStage === 'dashboard' && nextStage === 'profiles')
+
+    if (!isProfileDashboardSwitch) {
+      setEntryStage(nextStage)
+      return
+    }
+
+    setEntryTransitionState(entryStage === 'profiles' ? 'forward-exit' : 'back-exit')
+    await wait(240)
+    setEntryStage(nextStage)
+    setEntryTransitionState(nextStage === 'dashboard' ? 'forward-enter' : 'back-enter')
+    await wait(520)
+    setEntryTransitionState('idle')
+  }
 
   async function refreshBaseData() {
     const [settings, serviceOptions, dashboard] = await Promise.all([
@@ -198,7 +222,9 @@ function App() {
       }
       await refreshBaseData()
       setPassword('')
-      setNotice(authState === 'setup' ? 'Instance initialized.' : 'Signed in.')
+      if (authState === 'setup') {
+        setNotice('Instance initialized.')
+      }
       setAuthState('app')
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : 'Authentication failed.')
@@ -217,7 +243,7 @@ function App() {
         apiKey: config.jellyfin.apiKey,
       })
       setOptions((current) => ({ ...current, jellyfinUsers: response.jellyfinUsers }))
-      setEntryStage(response.jellyfinUsers.length ? 'profiles' : 'onboarding')
+      await transitionEntryStage(response.jellyfinUsers.length ? 'profiles' : 'onboarding')
       setNotice(response.jellyfinUsers.length ? 'Jellyfin users loaded.' : 'No Jellyfin users found.')
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load Jellyfin users.')
@@ -241,8 +267,7 @@ function App() {
       const response = await api.saveSettings(nextConfig)
       setConfig(response.config)
       await refreshBaseData()
-      setEntryStage('dashboard')
-      setNotice('Profile selected.')
+      await transitionEntryStage('dashboard')
       setRoute('home')
     } catch (selectError) {
       setError(selectError instanceof Error ? selectError.message : 'Failed to select Jellyfin profile.')
@@ -353,15 +378,17 @@ function App() {
 
   if (entryStage === 'profiles') {
     return (
-      <ProfileSelectionScreen
-        busy={busy}
-        currentUserId={config.jellyfin.userId}
-        error={error}
-        notice={notice}
-        onBackToOnboarding={() => setEntryStage('onboarding')}
-        onSelectUser={handleSelectJellyfinUser}
-        users={options.jellyfinUsers}
-      />
+      <div className={getEntryTransitionClassName(entryTransitionState)}>
+        <ProfileSelectionScreen
+          busy={busy}
+          currentUserId={config.jellyfin.userId}
+          error={error}
+          notice={notice}
+          onBackToOnboarding={() => void transitionEntryStage('onboarding')}
+          onSelectUser={handleSelectJellyfinUser}
+          users={options.jellyfinUsers}
+        />
+      </div>
     )
   }
 
@@ -370,12 +397,12 @@ function App() {
   const currentHub = route !== 'downloads' && route !== 'settings' ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
-    <div className="omniarr-app">
+    <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
       <Sidebar
         busy={busy}
         connections={connections}
         currentUser={currentJellyfinUser}
-        onExitProfile={() => setEntryStage('profiles')}
+        onExitProfile={() => void transitionEntryStage('profiles')}
         route={route}
         setRoute={setRoute}
       />
@@ -427,6 +454,14 @@ function App() {
       ) : null}
     </div>
   )
+}
+
+function getEntryTransitionClassName(state: EntryTransitionState) {
+  return state === 'idle' ? 'entry-stage-shell' : `entry-stage-shell is-${state}`
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function Sidebar(props: {
@@ -524,50 +559,76 @@ function AuthScreen({
   error: string
 }) {
   const isPasswordValid = password.trim().length >= 8
+  const isSetup = mode === 'setup'
+
+  function handleSubmit() {
+    if (busy || !isPasswordValid) {
+      return
+    }
+
+    void onSubmit()
+  }
+
   return (
-    <div className="auth-layout">
-      <section className="auth-panel">
-        <p className="eyebrow">{mode === 'setup' ? 'First boot' : 'Secure access'}</p>
-        <h1>{mode === 'setup' ? 'Create your master password' : 'Sign in to OmniArr'}</h1>
-        <p className="auth-copy">
-          {mode === 'setup'
-            ? 'This password protects the session and encrypts service settings on the server.'
-            : 'The full backend remains protected behind the current session.'}
-        </p>
-        <div className="auth-form">
-          <label>
-            Password
-            <input
-              autoComplete={mode === 'setup' ? 'new-password' : 'current-password'}
-              className="input"
-              minLength={8}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
-              type="password"
-              value={password}
-            />
-          </label>
-          {!isPasswordValid && password.length > 0 ? <p className="helper-text">Password must be at least 8 non-space characters.</p> : null}
-          {error ? <p className="error-banner">{error}</p> : null}
-          {busy ? <p className="notice">Contacting backend…</p> : null}
-          <button className="primary-button" disabled={busy || !isPasswordValid} onClick={() => void onSubmit()} type="button">
-            {busy ? 'Processing…' : mode === 'setup' ? 'Initialize' : 'Sign in'}
-          </button>
+    <div className={isSetup ? 'auth-layout' : 'auth-layout auth-layout-login'}>
+      <section className={isSetup ? 'auth-panel' : 'auth-panel auth-panel-login'}>
+        <div className="auth-panel-shell">
+          <p className="eyebrow">{isSetup ? 'First boot' : 'Secure access'}</p>
+          <h1>{isSetup ? 'Create your master password' : 'Sign in to OmniArr'}</h1>
+          <p className="auth-copy">
+            {isSetup
+              ? 'This password protects the session and encrypts service settings on the server.'
+              : 'Unlock the server session with your master password.'}
+          </p>
+        </div>
+        <div className="auth-form-card">
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleSubmit()
+            }}
+          >
+            <label>
+              {isSetup ? 'Master password' : 'Password'}
+              <input
+                autoComplete={isSetup ? 'new-password' : 'current-password'}
+                className="input"
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={isSetup ? 'At least 8 characters' : ''}
+                type="password"
+                value={password}
+              />
+            </label>
+            {isSetup && !isPasswordValid && password.length > 0 ? <p className="helper-text">Password must be at least 8 non-space characters.</p> : null}
+            {error ? <p className="error-banner">{error}</p> : null}
+            {busy ? <p className="notice">Contacting backend…</p> : null}
+            <button className="primary-button" disabled={busy || !isPasswordValid} type="submit">
+              {busy ? 'Processing…' : isSetup ? 'Initialize' : 'Sign in'}
+            </button>
+          </form>
         </div>
       </section>
 
-      <section className="auth-visual">
-        <div className="auth-wallpaper" />
-        <div className="glass-card">
-          <p className="eyebrow">Migration</p>
-          <ul className="feature-list">
-            <li>Server-side session auth</li>
-            <li>Encrypted persisted settings</li>
-            <li>Jellyfin, Sonarr and Radarr</li>
-            <li>Rebuilt React UI with shared layout</li>
-          </ul>
-        </div>
-      </section>
+      {isSetup ? (
+        <section className="auth-visual">
+          <div className="auth-wallpaper" />
+          <div className="glass-card">
+            <p className="eyebrow">Migration</p>
+            <ul className="feature-list">
+              <li>Server-side session auth</li>
+              <li>Encrypted persisted settings</li>
+              <li>Jellyfin, Sonarr and Radarr</li>
+              <li>Rebuilt React UI with shared layout</li>
+            </ul>
+          </div>
+        </section>
+      ) : (
+        <section className="auth-visual auth-visual-login" aria-hidden="true">
+          <div className="auth-wallpaper" />
+        </section>
+      )}
     </div>
   )
 }
@@ -942,9 +1003,16 @@ function MediaTile(props: {
   const imageUrl = props.styleType === 'landscape' || props.styleType === 'episode'
     ? (props.card.backdropUrl || props.card.posterUrl)
     : props.card.posterUrl
+  const continueEpisodeMeta = props.isContinueWatching ? parseContinueEpisodeMeta(props.card) : null
+  const tileClassName = [
+    'media-tile',
+    props.styleType,
+    props.isContinueWatching ? 'continue-tile' : '',
+    props.isContinueWatching && props.card.progress ? 'has-progress' : '',
+  ].filter(Boolean).join(' ')
 
   return (
-    <article className={props.isContinueWatching ? `media-tile ${props.styleType} continue-tile` : `media-tile ${props.styleType}`}>
+    <article className={tileClassName}>
       <button
         className="media-art media-trigger"
         onClick={(event) => {
@@ -954,7 +1022,13 @@ function MediaTile(props: {
         type="button"
       >
         {imageUrl ? <img alt={props.card.title} loading="lazy" src={imageUrl} /> : <div className="media-fallback" />}
-        {props.card.hoverLabel ? <div className="media-hover-label">{props.card.hoverLabel}</div> : null}
+        {continueEpisodeMeta ? (
+          <div className="continue-episode-meta">
+            <span className="continue-episode-meta-primary">{`Season ${continueEpisodeMeta.seasonNumber}`}</span>
+            <span className="continue-episode-meta-secondary">{`Episode ${continueEpisodeMeta.episodeNumber}`}</span>
+          </div>
+        ) : null}
+        {props.card.hoverLabel && !continueEpisodeMeta ? <div className="media-hover-label">{props.card.hoverLabel}</div> : null}
         {props.card.progress ? <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${props.card.progress}%` }} /></div> : null}
       </button>
     </article>
@@ -1240,6 +1314,7 @@ function TitleDetailsModal(props: {
   const canDownloadSeasonAction = Boolean(
     activeSeasonDownloadStatus === 'processing'
     || activeSeasonDownloadStatus === 'downloading'
+    || (details?.sonarrSeriesId && typeof activeSeasonNumber === 'number' && activeSeasonNumber > 0)
     || activeSeasonMeta?.canDownload
     || (canRequest && !details?.sonarrSeriesId && typeof activeSeasonNumber === 'number')
   )
@@ -1758,6 +1833,18 @@ function CheckGlyph() {
 
 function formatEpisodeMeta(subtitle: string) {
   return subtitle.replace(/^Season\s+\d+\s*,\s*/i, '')
+}
+
+function parseContinueEpisodeMeta(card: MediaCard) {
+  const match = `${card.subtitle} ${card.hoverLabel || ''}`.match(/\bS(\d{1,2})E(\d{1,3})\b/i)
+  if (!match) {
+    return null
+  }
+
+  return {
+    seasonNumber: Number(match[1]),
+    episodeNumber: Number(match[2]),
+  }
 }
 
 function truncateOverview(text: string, maxLength: number) {
