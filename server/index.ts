@@ -1,7 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { defaultConfig, type AppConfig, type AuthPayload, type EpisodeWatchStateRequest, type TitleDetailsRequest } from '../shared/contracts.js';
+import {
+  defaultConfig,
+  type AppConfig,
+  type AuthPayload,
+  type EpisodeWatchStateRequest,
+  type SeasonDeletePayload,
+  type SeasonRequestPayload,
+  type TitleDetailsRequest
+} from '../shared/contracts.js';
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
 import { loadState, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
 import {
@@ -11,11 +19,13 @@ import {
   getHubPage,
   getTitleDetails,
   getTmdbLogos,
+  deleteSeasonFiles,
   getServiceOptions,
   loadJellyfinUsers,
   proxyJellyfinImage,
   removeDownload,
   requestMovie,
+  requestSeason,
   requestSeries,
   setEpisodeWatchState,
   sanitizeConfig
@@ -253,6 +263,22 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<{ tmdbId: number }>(request);
     await requestSeries(config, Number(body.tmdbId));
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/requests/season' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<SeasonRequestPayload>(request);
+    await requestSeason(config, body);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/seasons/delete' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<SeasonDeletePayload>(request);
+    await deleteSeasonFiles(config, body);
     sendJson(response, 200, { ok: true });
     return;
   }

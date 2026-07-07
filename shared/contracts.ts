@@ -109,13 +109,19 @@ export interface MediaCard {
 
 export interface TitleDetailsEpisode {
   id: string;
+  seasonId?: string;
   title: string;
   overview: string;
   subtitle: string;
   imageUrl: string;
+  airDate?: string;
   seasonNumber?: number;
   episodeNumber?: number;
   runtimeMinutes?: number;
+  availableInJellyfin?: boolean;
+  availability?: 'available' | 'downloading' | 'missing' | 'unaired';
+  canDownload?: boolean;
+  canDelete?: boolean;
   watched?: boolean;
   progress?: number;
   playbackPositionTicks?: number;
@@ -126,12 +132,21 @@ export interface TitleDetailsSeason {
   title: string;
   seasonNumber?: number;
   episodeCount?: number;
+  availableEpisodeCount?: number;
+  missingEpisodeCount?: number;
+  canDownload?: boolean;
+  canDelete?: boolean;
+  isDownloading?: boolean;
+  downloadStatus?: 'idle' | 'processing' | 'downloading';
+  downloadProgress?: number;
+  downloadLabel?: string;
 }
 
 export interface TitleDetailsResponse {
   id: string;
   tmdbId?: number;
   providerId?: string;
+  sonarrSeriesId?: number;
   playTargetId?: string;
   availableInJellyfin: boolean;
   title: string;
@@ -181,6 +196,16 @@ export interface TitleDetailsRequest {
 export interface EpisodeWatchStateRequest {
   episodeId: string;
   watched: boolean;
+}
+
+export interface SeasonRequestPayload {
+  seriesId: number;
+  seasonNumber: number;
+}
+
+export interface SeasonDeletePayload {
+  seriesId: number;
+  seasonNumber: number;
 }
 
 export interface HubSection {

@@ -20,6 +20,7 @@ import {
   type MediaCard,
   type SelectOption,
   type ServiceOptionsResponse,
+  type TitleDetailsEpisode,
   type TitleDetailsResponse,
 } from '../shared/contracts'
 
@@ -28,12 +29,9 @@ type EntryStage = 'onboarding' | 'profiles' | 'dashboard'
 const MAX_CACHED_HUB_PAGES = 3
 type ModalOriginRect = { left: number; top: number; width: number; height: number }
 type SelectedCardState = { card: MediaCard; originRect: ModalOriginRect | null }
-type VisibleSeasonEpisode = TitleDetailsResponse['episodes'][number] & { seasonId: string }
-
-const SEASON_CACHE_RADIUS = 2
-const SEASON_PREFETCH_OFFSETS = [1, -1, 2, -2] as const
-const SEASON_PRELOAD_THRESHOLD_RATIO = 0.45
 const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
+const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
+const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
 
 const sidebarItems: Array<{ route: AppRoute; label: string; short: string }> = [
   { route: 'home', label: 'Inicio', short: 'H' },
@@ -408,7 +406,7 @@ function App() {
                 busy={busy}
                 hub={currentHub}
                 loading={hubLoading}
-                onOpenCard={(card, originRect) => setSelectedCard({ card, originRect })}
+                onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })}
                 onRequest={handleRequest}
                 route={route}
                 tmdbToken={config.tmdb.bearerToken}
@@ -867,25 +865,11 @@ function resolveHeroSlideStyle(card: MediaCard | undefined) {
   return slideImage ? { backgroundImage: `url("${slideImage}")` } : undefined
 }
 
-function getSeasonWindowIds(seasons: TitleDetailsResponse['seasons'], centerIndex: number, radius = SEASON_CACHE_RADIUS) {
-  return seasons
-    .slice(Math.max(0, centerIndex - radius), centerIndex + radius + 1)
-    .map((season) => season.id)
-}
-
-function getVisibleSeasonEpisodes(
-  seasons: TitleDetailsResponse['seasons'],
-  centerIndex: number,
-  cache: Map<string, TitleDetailsResponse>
-): VisibleSeasonEpisode[] {
-  return seasons
-    .filter((_, index) => Math.abs(index - centerIndex) <= SEASON_CACHE_RADIUS)
-    .flatMap((season) =>
-      (cache.get(season.id)?.episodes || []).map((episode) => ({
-        ...episode,
-        seasonId: season.id,
-      }))
-    )
+function getSeasonEpisodes(
+  episodes: TitleDetailsEpisode[],
+  seasonId: string
+): TitleDetailsEpisode[] {
+  return episodes.filter((episode) => episode.seasonId === seasonId)
 }
 
 function findSeasonAnchorElement(list: HTMLDivElement, seasonId: string) {
@@ -987,11 +971,9 @@ function TitleDetailsModal(props: {
   const [details, setDetails] = useState<TitleDetailsResponse | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(true)
   const [detailsError, setDetailsError] = useState('')
-  const [requestedSeasonId, setRequestedSeasonId] = useState<string | undefined>(undefined)
   const [activeSeasonId, setActiveSeasonId] = useState<string | undefined>(undefined)
-  const [seasonCacheVersion, setSeasonCacheVersion] = useState(0)
-  const [loadingSeasonIds, setLoadingSeasonIds] = useState<string[]>([])
   const [episodeWatchBusyId, setEpisodeWatchBusyId] = useState<string | null>(null)
+  const [seasonActionBusy, setSeasonActionBusy] = useState<'download' | 'delete' | null>(null)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
   const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
@@ -1002,11 +984,10 @@ function TitleDetailsModal(props: {
   const closeTimeoutRef = useRef<number | null>(null)
   const modalRef = useRef<HTMLDivElement | null>(null)
   const episodeListRef = useRef<HTMLDivElement | null>(null)
-  const seasonDetailsCacheRef = useRef(new Map<string, TitleDetailsResponse>())
-  const seasonRequestsRef = useRef(new Map<string, Promise<TitleDetailsResponse>>())
   const pendingSeasonScrollRef = useRef<string | null>(null)
-  const previousRenderedSeasonIdsRef = useRef<string[]>([])
   const initialEpisodeFocusKeyRef = useRef('')
+  const hasUserScrolledEpisodeListRef = useRef(false)
+  const initialEpisodeListScrollLeftRef = useRef(0)
 
   useLayoutEffect(() => {
     if (!props.originRect || !modalRef.current) {
@@ -1026,7 +1007,7 @@ function TitleDetailsModal(props: {
       ['--title-modal-from-y' as '--title-modal-from-y']: `${translateY}px`,
       ['--title-modal-from-scale-x' as '--title-modal-from-scale-x']: `${scaleX}`,
       ['--title-modal-from-scale-y' as '--title-modal-from-scale-y']: `${scaleY}`,
-    })
+    } as CSSProperties)
 
     let frameA = 0
     let frameB = 0
@@ -1052,115 +1033,44 @@ function TitleDetailsModal(props: {
     setDetails(null)
     setDetailsLoading(true)
     setDetailsError('')
-    setRequestedSeasonId(undefined)
     setActiveSeasonId(undefined)
-    setSeasonCacheVersion(0)
-    setLoadingSeasonIds([])
     setEpisodeWatchBusyId(null)
+    setSeasonActionBusy(null)
     setPlayerTarget(null)
     setIsOverviewExpanded(false)
-    seasonDetailsCacheRef.current.clear()
-    seasonRequestsRef.current.clear()
     pendingSeasonScrollRef.current = null
-    previousRenderedSeasonIdsRef.current = []
     initialEpisodeFocusKeyRef.current = ''
+    hasUserScrolledEpisodeListRef.current = false
+    initialEpisodeListScrollLeftRef.current = 0
   }, [props.card.id])
 
-  function cacheSeasonDetails(nextDetails: TitleDetailsResponse, requestedSeason?: string) {
-    const resolvedSeasonId = nextDetails.selectedSeasonId || requestedSeason
-    if (requestedSeason) {
-      seasonDetailsCacheRef.current.set(requestedSeason, nextDetails)
-    }
-    if (resolvedSeasonId) {
-      seasonDetailsCacheRef.current.set(resolvedSeasonId, nextDetails)
-    }
-    setSeasonCacheVersion((current) => current + 1)
-    return resolvedSeasonId
-  }
-
-  function ensureSeasonLoaded(seasonId: string) {
-    const cached = seasonDetailsCacheRef.current.get(seasonId)
-    if (cached) {
-      return Promise.resolve(cached)
-    }
-
-    const existingRequest = seasonRequestsRef.current.get(seasonId)
-    if (existingRequest) {
-      return existingRequest
-    }
-
-    setLoadingSeasonIds((current) => current.includes(seasonId) ? current : [...current, seasonId])
-    const request = api.getTitleDetails(props.card, seasonId)
-      .then((nextDetails) => {
-        cacheSeasonDetails(nextDetails, seasonId)
-        return nextDetails
-      })
-      .finally(() => {
-        seasonRequestsRef.current.delete(seasonId)
-        setLoadingSeasonIds((current) => current.filter((id) => id !== seasonId))
-      })
-
-    seasonRequestsRef.current.set(seasonId, request)
-    return request
-  }
-
   function updateEpisodeInCaches(episodeId: string, updater: (episode: NonNullable<TitleDetailsResponse['episodes']>[number]) => NonNullable<TitleDetailsResponse['episodes']>[number]) {
-    let changed = false
-    for (const [key, cachedDetails] of seasonDetailsCacheRef.current.entries()) {
-      if (!cachedDetails.episodes.some((episode) => episode.id === episodeId)) {
-        continue
-      }
+    setDetails((current) => current && current.episodes.some((episode) => episode.id === episodeId)
+      ? {
+          ...current,
+          episodes: current.episodes.map((episode) => episode.id === episodeId ? updater(episode) : episode)
+        }
+      : current)
+  }
 
-      seasonDetailsCacheRef.current.set(key, {
-        ...cachedDetails,
-        episodes: cachedDetails.episodes.map((episode) => episode.id === episodeId ? updater(episode) : episode)
-      })
-      changed = true
-    }
-
-    if (changed) {
-      setSeasonCacheVersion((current) => current + 1)
-      setDetails((current) => current && current.episodes.some((episode) => episode.id === episodeId)
-        ? {
-            ...current,
-            episodes: current.episodes.map((episode) => episode.id === episodeId ? updater(episode) : episode)
-          }
-        : current)
-    }
+  async function refreshSeasonState(targetSeasonId?: string) {
+    const refreshSeasonId = targetSeasonId || activeSeasonId || details?.selectedSeasonId
+    const nextDetails = await api.getTitleDetails(props.card, refreshSeasonId)
+    setDetails(nextDetails)
+    setDetailsError('')
+    setActiveSeasonId(refreshSeasonId || nextDetails.selectedSeasonId)
   }
 
   useEffect(() => {
     let cancelled = false
-    const cacheKey = requestedSeasonId || '__default__'
-    const cachedDetails = requestedSeasonId
-      ? seasonDetailsCacheRef.current.get(requestedSeasonId)
-      : seasonDetailsCacheRef.current.get(cacheKey)
-
-    if (cachedDetails) {
-      setDetails(cachedDetails)
-      setDetailsLoading(false)
-      setDetailsError('')
-      const resolvedSeasonId = cachedDetails.selectedSeasonId || requestedSeasonId
-      if (resolvedSeasonId) {
-        setActiveSeasonId(resolvedSeasonId)
-      }
-      return () => {
-        cancelled = true
-      }
-    }
-
     setDetailsLoading(true)
     setDetailsError('')
 
-    void api.getTitleDetails(props.card, requestedSeasonId)
+    void api.getTitleDetails(props.card)
       .then((nextDetails) => {
         if (cancelled) return
-        seasonDetailsCacheRef.current.set(cacheKey, nextDetails)
-        const resolvedSeasonId = cacheSeasonDetails(nextDetails, requestedSeasonId)
-        if (resolvedSeasonId) {
-          setActiveSeasonId(resolvedSeasonId)
-        }
         setDetails(nextDetails)
+        setActiveSeasonId(nextDetails.selectedSeasonId)
       })
       .catch((error) => {
         if (cancelled) return
@@ -1174,49 +1084,9 @@ function TitleDetailsModal(props: {
     return () => {
       cancelled = true
     }
-  }, [props.card, requestedSeasonId])
+  }, [props.card])
 
-  const seasonValue = activeSeasonId ?? requestedSeasonId ?? details?.selectedSeasonId ?? ''
-
-  useEffect(() => {
-    if (!details || details.mediaType !== 'series' || !details.seasons.length) {
-      return
-    }
-
-    const currentIndex = details.seasons.findIndex((season) => season.id === seasonValue)
-    if (currentIndex < 0) {
-      return
-    }
-
-    const keepSeasonIds = new Set(getSeasonWindowIds(details.seasons, currentIndex))
-
-    for (const seasonId of Array.from(seasonDetailsCacheRef.current.keys())) {
-      if (seasonId !== '__default__' && !keepSeasonIds.has(seasonId)) {
-        seasonDetailsCacheRef.current.delete(seasonId)
-      }
-    }
-  }, [details, seasonCacheVersion, seasonValue])
-
-  useEffect(() => {
-    if (!details || details.mediaType !== 'series' || !details.seasons.length) {
-      return
-    }
-
-    const activeIndex = details.seasons.findIndex((season) => season.id === seasonValue)
-    if (activeIndex < 0) {
-      return
-    }
-
-    const prioritySeasonIds = SEASON_PREFETCH_OFFSETS
-      .map((offset) => details.seasons[activeIndex + offset]?.id)
-      .filter(Boolean) as string[]
-
-    for (const seasonId of prioritySeasonIds) {
-      if (!seasonDetailsCacheRef.current.has(seasonId)) {
-        void ensureSeasonLoaded(seasonId)
-      }
-    }
-  }, [details, seasonValue])
+  const seasonValue = activeSeasonId ?? details?.selectedSeasonId ?? ''
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -1230,14 +1100,12 @@ function TitleDetailsModal(props: {
       return
     }
 
-    const listRect = list.getBoundingClientRect()
-    const targetRect = targetEpisode.getBoundingClientRect()
     list.scrollTo({
-      left: list.scrollLeft + (targetRect.left - listRect.left),
+      left: Math.max(0, targetEpisode.offsetLeft - (list.clientWidth - targetEpisode.offsetWidth) / 2),
       behavior: 'smooth',
     })
     pendingSeasonScrollRef.current = null
-  }, [details, seasonCacheVersion, seasonValue])
+  }, [details, seasonValue])
 
   useLayoutEffect(() => {
     const list = episodeListRef.current
@@ -1255,46 +1123,9 @@ function TitleDetailsModal(props: {
       return
     }
 
+    initialEpisodeListScrollLeftRef.current = list.scrollLeft
     initialEpisodeFocusKeyRef.current = focusKey
-  }, [details?.playTargetId, props.card.id, seasonCacheVersion])
-
-  useLayoutEffect(() => {
-    const list = episodeListRef.current
-    if (!list || pendingSeasonScrollRef.current) {
-      return
-    }
-
-    const previousRenderedSeasonIds = previousRenderedSeasonIdsRef.current
-    const currentRenderedSeasonIds = Array.from(new Set(
-      Array.from(list.querySelectorAll<HTMLElement>('[data-season-id]'))
-        .map((card) => card.dataset.seasonId)
-        .filter((seasonId): seasonId is string => Boolean(seasonId))
-    ))
-
-    if (!previousRenderedSeasonIds.length) {
-      previousRenderedSeasonIdsRef.current = currentRenderedSeasonIds
-      return
-    }
-
-    const previousFirstSeasonId = previousRenderedSeasonIds[0]
-    const currentFirstSeasonId = currentRenderedSeasonIds[0]
-
-    if (previousFirstSeasonId && currentFirstSeasonId && previousFirstSeasonId !== currentFirstSeasonId) {
-      if (currentRenderedSeasonIds.includes(previousFirstSeasonId)) {
-        const anchorCard = findSeasonAnchorElement(list, previousFirstSeasonId)
-        if (anchorCard) {
-          list.scrollLeft += anchorCard.offsetLeft
-        }
-      } else if (previousRenderedSeasonIds.includes(currentFirstSeasonId)) {
-        const currentFirstCard = findSeasonAnchorElement(list, currentFirstSeasonId)
-        if (currentFirstCard) {
-          list.scrollLeft = Math.max(0, list.scrollLeft - currentFirstCard.offsetLeft)
-        }
-      }
-    }
-
-    previousRenderedSeasonIdsRef.current = currentRenderedSeasonIds
-  }, [details, seasonCacheVersion, seasonValue])
+  }, [details?.playTargetId, props.card.id])
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -1309,6 +1140,13 @@ function TitleDetailsModal(props: {
         canScrollLeft: list.scrollLeft > 8,
         canScrollRight: maxScrollLeft - list.scrollLeft > 8,
       })
+
+      if (
+        !hasUserScrolledEpisodeListRef.current
+        && Math.abs(list.scrollLeft - initialEpisodeListScrollLeftRef.current) > 32
+      ) {
+        hasUserScrolledEpisodeListRef.current = true
+      }
 
       const viewportLeft = list.scrollLeft
       const viewportRight = viewportLeft + list.clientWidth
@@ -1343,36 +1181,17 @@ function TitleDetailsModal(props: {
         }
       }
 
-      if (dominantSeasonId && dominantSeasonId !== activeSeasonId) {
+      const currentCoverage = coverageBySeason.get(activeSeasonId || seasonValue) || 0
+      const coverageThreshold = Math.max(currentCoverage * SEASON_DOMINANCE_SWITCH_RATIO, SEASON_DOMINANCE_SWITCH_MIN_PX)
+
+      if (
+        hasUserScrolledEpisodeListRef.current
+        && !pendingSeasonScrollRef.current
+        && dominantSeasonId
+        && dominantSeasonId !== activeSeasonId
+        && dominantCoverage - currentCoverage > coverageThreshold
+      ) {
         setActiveSeasonId(dominantSeasonId)
-      }
-
-      const activeBounds = boundsBySeason.get(dominantSeasonId || seasonValue)
-      const activeIndex = details.seasons.findIndex((season) => season.id === (dominantSeasonId || seasonValue))
-      if (!activeBounds || activeIndex < 0) {
-        return
-      }
-
-      const preloadThreshold = list.clientWidth * SEASON_PRELOAD_THRESHOLD_RATIO
-      const previousSeasonId = details.seasons[activeIndex - 1]?.id
-      const nextSeasonId = details.seasons[activeIndex + 1]?.id
-      const nextNextSeasonId = details.seasons[activeIndex + 2]?.id
-      const previousPreviousSeasonId = details.seasons[activeIndex - 2]?.id
-
-      if (previousSeasonId && viewportLeft - activeBounds.left < preloadThreshold && !seasonDetailsCacheRef.current.has(previousSeasonId)) {
-        void ensureSeasonLoaded(previousSeasonId)
-      }
-
-      if (nextSeasonId && activeBounds.right - viewportRight < preloadThreshold && !seasonDetailsCacheRef.current.has(nextSeasonId)) {
-        void ensureSeasonLoaded(nextSeasonId)
-      }
-
-      if (nextNextSeasonId && activeBounds.right - viewportRight < preloadThreshold * 0.5 && !seasonDetailsCacheRef.current.has(nextNextSeasonId)) {
-        void ensureSeasonLoaded(nextNextSeasonId)
-      }
-
-      if (previousPreviousSeasonId && viewportLeft - activeBounds.left < preloadThreshold * 0.5 && !seasonDetailsCacheRef.current.has(previousPreviousSeasonId)) {
-        void ensureSeasonLoaded(previousPreviousSeasonId)
       }
     }
 
@@ -1384,7 +1203,7 @@ function TitleDetailsModal(props: {
       list.removeEventListener('scroll', syncScrollState)
       window.removeEventListener('resize', syncScrollState)
     }
-  }, [activeSeasonId, details, detailsLoading, seasonCacheVersion, seasonValue])
+  }, [activeSeasonId, details, detailsLoading, seasonValue])
 
   const canRequest = Boolean(props.card.tmdbId && props.card.mediaType !== 'mixed')
   const playId = details?.playTargetId || details?.providerId || props.card.providerId
@@ -1404,19 +1223,45 @@ function TitleDetailsModal(props: {
   const jellyfinPlayerUrl = playerTarget && props.config.jellyfin.baseUrl
     ? buildJellyfinPlayerUrl(props.config.jellyfin.baseUrl, playerTarget.id)
     : ''
+  const playLabel = playerTarget?.title || details?.episodes.find((episode) => episode.id === playId)?.title || displayTitle
   const activeSeasonMeta = details?.seasons.find((season) => season.id === seasonValue)
-  const activeSeasonDetails = seasonValue ? seasonDetailsCacheRef.current.get(seasonValue) : null
+  const activeSeasonDetails = details && seasonValue
+    ? { episodes: getSeasonEpisodes(details.episodes, seasonValue) }
+    : null
+  const activeSeasonNumber = activeSeasonMeta?.seasonNumber
+  const activeSeasonDownloadStatus = activeSeasonMeta?.downloadStatus || 'idle'
   const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
   const resolvedSeasonIndex = currentSeasonIndex >= 0 ? currentSeasonIndex : 0
   const hasPreviousSeason = Boolean(details?.seasons.length && resolvedSeasonIndex > 0)
   const hasNextSeason = Boolean(details?.seasons.length && resolvedSeasonIndex < details.seasons.length - 1)
-  const previousSeasonId = hasPreviousSeason ? details?.seasons[resolvedSeasonIndex - 1]?.id : undefined
-  const nextSeasonId = hasNextSeason ? details?.seasons[resolvedSeasonIndex + 1]?.id : undefined
-  const isPreviousSeasonLoading = Boolean(previousSeasonId && loadingSeasonIds.includes(previousSeasonId))
-  const isNextSeasonLoading = Boolean(nextSeasonId && loadingSeasonIds.includes(nextSeasonId))
   const visibleEpisodes = details
-    ? getVisibleSeasonEpisodes(details.seasons, resolvedSeasonIndex, seasonDetailsCacheRef.current)
+    ? details.episodes
     : []
+  const canDownloadSeasonAction = Boolean(
+    activeSeasonDownloadStatus === 'processing'
+    || activeSeasonDownloadStatus === 'downloading'
+    || activeSeasonMeta?.canDownload
+    || (canRequest && !details?.sonarrSeriesId && typeof activeSeasonNumber === 'number')
+  )
+  const canDeleteSeasonAction = Boolean(activeSeasonMeta?.canDelete)
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series') {
+      return
+    }
+
+    if (activeSeasonDownloadStatus !== 'processing' && activeSeasonDownloadStatus !== 'downloading') {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshSeasonState(seasonValue || undefined)
+    }, 3500)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [activeSeasonDownloadStatus, details, seasonValue])
 
   function handleRequestClose() {
     if (!props.originRect || transitionState === 'closing') {
@@ -1452,17 +1297,11 @@ function TitleDetailsModal(props: {
     }
     pendingSeasonScrollRef.current = nextSeason.id
     setActiveSeasonId(nextSeason.id)
-    startTransition(() => {
-      setRequestedSeasonId(nextSeason.id)
-    })
   }
 
   function handleSeasonSelectChange(nextSeasonId: string) {
     pendingSeasonScrollRef.current = nextSeasonId || null
     setActiveSeasonId(nextSeasonId || undefined)
-    startTransition(() => {
-      setRequestedSeasonId(nextSeasonId || undefined)
-    })
   }
 
   function handleEpisodeWatchToggle(
@@ -1498,23 +1337,56 @@ function TitleDetailsModal(props: {
       })
   }
 
-  if (playerTarget && jellyfinPlayerUrl) {
-    return (
-      <div className="modal-backdrop player-backdrop" role="presentation">
-        <div className="title-player-view" role="dialog" aria-modal="true">
-          <div className="title-player-topbar">
-            <button className="secondary-button" onClick={() => setPlayerTarget(null)} type="button">Back</button>
-            <button aria-label="Close" className="modal-close reiverr-modal-close" onClick={props.onClose} type="button">×</button>
-          </div>
-          <iframe
-            allow="autoplay; fullscreen; encrypted-media"
-            className="title-player-frame"
-            src={jellyfinPlayerUrl}
-            title={`${playerTarget.title} player`}
-          />
-        </div>
-      </div>
-    )
+  async function handleSeasonDownload() {
+    if (typeof activeSeasonNumber !== 'number') {
+      return
+    }
+
+    if (activeSeasonDownloadStatus === 'processing' || activeSeasonDownloadStatus === 'downloading') {
+      return
+    }
+
+    setSeasonActionBusy('download')
+    setDetailsError('')
+    try {
+      if (details?.sonarrSeriesId) {
+        await api.requestSeason({
+          seriesId: details.sonarrSeriesId,
+          seasonNumber: activeSeasonNumber,
+        })
+      } else {
+        await props.onRequest(props.card)
+      }
+      await refreshSeasonState(seasonValue || undefined)
+    } catch (error) {
+      setDetailsError(error instanceof Error ? error.message : 'Failed to queue the season download.')
+    } finally {
+      setSeasonActionBusy(null)
+    }
+  }
+
+  async function handleSeasonDelete() {
+    if (!details?.sonarrSeriesId || typeof activeSeasonNumber !== 'number') {
+      return
+    }
+
+    if (!window.confirm(`Delete downloaded files for Season ${activeSeasonNumber}?`)) {
+      return
+    }
+
+    setSeasonActionBusy('delete')
+    setDetailsError('')
+    try {
+      await api.deleteSeason({
+        seriesId: details.sonarrSeriesId,
+        seasonNumber: activeSeasonNumber,
+      })
+      await refreshSeasonState(seasonValue || undefined)
+    } catch (error) {
+      setDetailsError(error instanceof Error ? error.message : 'Failed to delete season files.')
+    } finally {
+      setSeasonActionBusy(null)
+    }
   }
 
   return (
@@ -1537,15 +1409,42 @@ function TitleDetailsModal(props: {
             <p>Loading details…</p>
           </div>
         ) : null}
-        <div className="title-details-modal-content">
-          <div className="title-details-hero" style={backgroundImage ? { backgroundImage: `url("${backgroundImage}")` } : undefined}>
-            <div className="title-details-darken" />
-            <button aria-label="Close" className="modal-close reiverr-modal-close" onClick={handleRequestClose} type="button">×</button>
-          </div>
+        <div className={playerTarget && jellyfinPlayerUrl ? 'title-details-modal-content has-embedded-player' : 'title-details-modal-content'}>
+          {playerTarget && jellyfinPlayerUrl ? (
+            <div className="title-embedded-player">
+              <div className="title-player-topbar title-player-topbar-embedded">
+                <button aria-label="Back to details" className="title-player-inline-control" onClick={() => setPlayerTarget(null)} type="button">
+                  <MenuGlyph />
+                </button>
+                <div className="title-player-topbar-brand" aria-hidden="true">
+                  {logoUrl ? (
+                    <img alt="" className="title-player-topbar-logo" src={logoUrl} />
+                  ) : (
+                    <span className="title-player-topbar-title">{displayTitle}</span>
+                  )}
+                </div>
+                <button aria-label="Close" className="title-player-inline-control title-player-inline-close" onClick={handleRequestClose} type="button">×</button>
+              </div>
+              <div className="title-player-frame-shell">
+                <iframe
+                  allow="autoplay; fullscreen; encrypted-media"
+                  className="title-player-frame title-player-frame-embedded"
+                  src={jellyfinPlayerUrl}
+                  title={`${playLabel} player`}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="title-details-hero" style={backgroundImage ? { backgroundImage: `url("${backgroundImage}")` } : undefined}>
+              <div className="title-details-darken" />
+              <button aria-label="Close" className="modal-close reiverr-modal-close" onClick={handleRequestClose} type="button">×</button>
+            </div>
+          )}
 
-          <div className="title-details-body">
+          <div className={playerTarget && jellyfinPlayerUrl ? 'title-details-body has-embedded-player' : 'title-details-body'}>
             <div className="title-details-shell">
               {detailsError ? <p className="error-banner">{detailsError}</p> : null}
+              {playerTarget && jellyfinPlayerUrl ? null : (
               <div className="title-details-summary">
                 <div className="title-details-hero-heading">
                   {logoUrl ? (
@@ -1572,7 +1471,7 @@ function TitleDetailsModal(props: {
                   </p>
                   <div className="title-details-summary-header">
                     {canPlay ? (
-                      <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: displayTitle })} type="button">
+                      <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} type="button">
                         <PlayGlyph />
                         <span>Play</span>
                       </button>
@@ -1586,19 +1485,21 @@ function TitleDetailsModal(props: {
                 </div>
                 {displayYear ? <p className="title-details-year">{displayYear}</p> : null}
               </div>
+              )}
               {details?.mediaType === 'series' ? (
                 <div className="title-seasons-panel">
                   <div className="title-seasons-header">
                     <div
                       className="title-season-strip"
                     >
-                      <button
-                        aria-label="Previous season"
-                        className="title-season-nav"
-                        disabled={!hasPreviousSeason}
-                        onClick={() => changeSeason(-1)}
-                        type="button"
-                      />
+                      {hasPreviousSeason ? (
+                        <button
+                          aria-label="Previous season"
+                          className="title-season-nav"
+                          onClick={() => changeSeason(-1)}
+                          type="button"
+                        />
+                      ) : null}
                       {details.seasons.length ? (
                         <label className="title-season-selector">
                           <span className="title-season-kicker">Season</span>
@@ -1620,13 +1521,67 @@ function TitleDetailsModal(props: {
                         <strong>{activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length}</strong>
                         <span>{(activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
                       </div>
-                      <button
-                        aria-label="Next season"
-                        className="title-season-nav next"
-                        disabled={!hasNextSeason}
-                        onClick={() => changeSeason(1)}
-                        type="button"
-                      />
+                          {canDownloadSeasonAction || canDeleteSeasonAction ? (
+                            <div className="title-season-actions">
+                              {canDownloadSeasonAction || activeSeasonMeta?.isDownloading ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
+                              {canDownloadSeasonAction || activeSeasonMeta?.isDownloading ? (
+                                activeSeasonDownloadStatus === 'downloading' ? (
+                                  <div
+                                    aria-label="Season downloading"
+                                    className="title-season-progress"
+                                    role="img"
+                                    title={activeSeasonMeta?.downloadLabel || 'Downloading'}
+                                  >
+                                    <div
+                                      className="title-season-progress-bar"
+                                      style={{ width: `${activeSeasonMeta?.downloadProgress || 0}%` }}
+                                    />
+                                  </div>
+                                ) : activeSeasonDownloadStatus === 'processing' ? (
+                                  <div
+                                    aria-label="Season processing"
+                                    className="title-season-processing"
+                                    role="img"
+                                    title={activeSeasonMeta?.downloadLabel || 'Processing'}
+                                  >
+                                    <span className="title-season-processing-spinner" aria-hidden="true" />
+                                  </div>
+                                ) : (
+                                  <button
+                                    aria-label="Download season"
+                                    className="title-season-action"
+                                    disabled={seasonActionBusy === 'download'}
+                                    onClick={() => void handleSeasonDownload()}
+                                    type="button"
+                                  >
+                                    <DownloadGlyph />
+                                  </button>
+                                )
+                              ) : null}
+                              {canDeleteSeasonAction ? (
+                                <div className="title-season-divider title-season-action-divider" aria-hidden="true" />
+                              ) : null}
+                              {canDeleteSeasonAction ? (
+                                <button
+                                  aria-label="Delete season files"
+                                  className="title-season-action title-season-action-delete"
+                                  disabled={seasonActionBusy === 'delete'}
+                                  onClick={() => void handleSeasonDelete()}
+                                  type="button"
+                                >
+                                  <TrashGlyph />
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                      {hasNextSeason ? (
+                        <button
+                          aria-label="Next season"
+                          className="title-season-nav next"
+                          onClick={() => changeSeason(1)}
+                          type="button"
+                        />
+                      ) : null}
                     </div>
                   </div>
                     <div
@@ -1652,8 +1607,6 @@ function TitleDetailsModal(props: {
                         type="button"
                       />
                     ) : null}
-                    {isPreviousSeasonLoading ? <div className="episode-dock-spinner left" aria-hidden="true" /> : null}
-                    {isNextSeasonLoading ? <div className="episode-dock-spinner right" aria-hidden="true" /> : null}
                     <div
                       className="episode-list"
                       ref={episodeListRef}
@@ -1663,20 +1616,33 @@ function TitleDetailsModal(props: {
                           className={[
                             'episode-card',
                             episode.id === details.playTargetId ? 'is-next-up' : '',
+                            episode.id === playerTarget?.id ? 'is-playing' : '',
+                            episode.id === details.playTargetId && episode.id === playerTarget?.id ? 'is-playing-next-up' : '',
                             episode.progress && !episode.watched ? 'has-progress' : '',
+                            episode.canDownload ? 'is-downloadable' : '',
+                            episode.availability === 'downloading' ? 'is-downloading' : '',
+                            !episode.availableInJellyfin ? 'is-unavailable' : '',
                           ].filter(Boolean).join(' ')}
                           data-episode-id={episode.id}
                           data-season-id={episode.seasonId}
                           key={`${episode.seasonId}-${episode.id}`}
-                          onClick={() => setPlayerTarget({ id: episode.id, title: episode.title })}
+                          onClick={() => {
+                            if (!episode.availableInJellyfin) {
+                              return
+                            }
+                            setPlayerTarget({ id: episode.id, title: episode.title })
+                          }}
                           onKeyDown={(event) => {
+                            if (!episode.availableInJellyfin) {
+                              return
+                            }
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault()
                               setPlayerTarget({ id: episode.id, title: episode.title })
                             }
                           }}
-                          role="button"
-                          tabIndex={0}
+                          role={episode.availableInJellyfin ? 'button' : undefined}
+                          tabIndex={episode.availableInJellyfin ? 0 : -1}
                         >
                           <div className="episode-card-art">
                             {episode.progress && !episode.watched ? (
@@ -1691,21 +1657,32 @@ function TitleDetailsModal(props: {
                             <div className="episode-card-title-row">
                               <strong>{episode.title}</strong>
                               <div className="episode-card-state-icons">
-                                <button
-                                  aria-label={episode.watched ? 'Mark episode as unwatched' : 'Mark episode as watched'}
-                                  className={episode.watched ? 'episode-card-watch-toggle is-watched' : 'episode-card-watch-toggle'}
-                                  disabled={episodeWatchBusyId === episode.id}
-                                  onClick={(event) => handleEpisodeWatchToggle(
-                                    event,
-                                    episode.id,
-                                    episode.watched,
-                                    episode.progress,
-                                    episode.playbackPositionTicks
-                                  )}
-                                  type="button"
-                                >
-                                  <CheckGlyph />
-                                </button>
+                                {episode.canDownload || episode.availability === 'downloading' ? (
+                                  <span
+                                    aria-label={episode.availability === 'downloading' ? 'Episode downloading' : 'Episode available to download'}
+                                    className={episode.availability === 'downloading' ? 'episode-card-availability is-downloading' : 'episode-card-availability'}
+                                    title={episode.availability === 'downloading' ? 'Downloading' : 'Available to download'}
+                                  >
+                                    <DownloadGlyph />
+                                  </span>
+                                ) : null}
+                                {episode.availableInJellyfin ? (
+                                  <button
+                                    aria-label={episode.watched ? 'Mark episode as unwatched' : 'Mark episode as watched'}
+                                    className={episode.watched ? 'episode-card-watch-toggle is-watched' : 'episode-card-watch-toggle'}
+                                    disabled={episodeWatchBusyId === episode.id}
+                                    onClick={(event) => handleEpisodeWatchToggle(
+                                      event,
+                                      episode.id,
+                                      episode.watched,
+                                      episode.progress,
+                                      episode.playbackPositionTicks
+                                    )}
+                                    type="button"
+                                  >
+                                    <CheckGlyph />
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
                             <span>{formatEpisodeMeta(episode.subtitle)}</span>
@@ -1746,11 +1723,27 @@ function PlayGlyph() {
   )
 }
 
+function MenuGlyph() {
+  return (
+    <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
+      <path d="M3 4.25h10v1.5H3zM3 7.25h10v1.5H3zM3 10.25h10v1.5H3z" fill="currentColor" />
+    </svg>
+  )
+}
+
 function DownloadGlyph() {
   return (
     <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
       <path d="M8.75 2.5h-1.5v6.1L5.1 6.45 4 7.55 8 11.55l4-4-1.1-1.1-2.15 2.15V2.5Z" fill="currentColor" />
       <path d="M3 12h10v1.5H3z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function TrashGlyph() {
+  return (
+    <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
+      <path d="M5.5 3.25h5l.55 1.25H13v1.25h-1v6.5A1.75 1.75 0 0 1 10.25 14h-4.5A1.75 1.75 0 0 1 4 12.25v-6.5H3V4.5h1.95l.55-1.25Zm-.25 2.5v6.5c0 .28.22.5.5.5h4.5c.28 0 .5-.22.5-.5v-6.5h-5.5ZM6.75 7h1.25v4h-1.25V7Zm2.25 0h1.25v4H9V7Z" fill="currentColor" />
     </svg>
   )
 }

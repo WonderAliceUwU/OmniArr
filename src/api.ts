@@ -9,6 +9,8 @@ import type {
   ServiceOptionsResponse,
   SessionResponse,
   EpisodeWatchStateRequest,
+  SeasonDeletePayload,
+  SeasonRequestPayload,
   TitleDetailsRequest,
   TitleDetailsResponse
 } from '../shared/contracts'
@@ -104,5 +106,15 @@ export const api = {
     request<{ ok: boolean }>('/api/requests/series', {
       method: 'POST',
       body: JSON.stringify({ tmdbId }),
+    }),
+  requestSeason: (payload: SeasonRequestPayload) =>
+    request<{ ok: boolean }>('/api/requests/season', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteSeason: (payload: SeasonDeletePayload) =>
+    request<{ ok: boolean }>('/api/seasons/delete', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 }
