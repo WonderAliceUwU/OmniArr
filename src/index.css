@@ -1224,13 +1224,13 @@ img {
   position: relative;
   z-index: 0;
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .title-details-modal-content.has-embedded-player {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 
 .title-details-modal-transition .title-details-modal-content {
@@ -1415,6 +1415,10 @@ img {
   padding-top: 1rem;
 }
 
+.title-details-primary {
+  display: contents;
+}
+
 .title-details-summary {
   position: relative;
   display: grid;
@@ -1469,6 +1473,111 @@ img {
 .title-seasons-panel {
   display: grid;
   gap: 1.3rem;
+}
+
+.title-cast-shell {
+  padding: 0 1.5rem 1.6rem;
+  background: #090b10;
+}
+
+.title-cast-shell .title-cast-panel {
+  width: min(100%, 84rem);
+  margin: 0 auto;
+}
+
+.title-cast-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 0.2rem 0;
+}
+
+.title-cast-header h3 {
+  margin: 0;
+  color: #eef4ff;
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.title-cast-list {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0 0.45rem;
+  scrollbar-width: none;
+}
+
+.title-cast-list::-webkit-scrollbar {
+  display: none;
+}
+
+.cast-card {
+  flex: 0 0 8.8rem;
+  display: grid;
+  gap: 0.65rem;
+  justify-items: center;
+}
+
+.cast-card-art {
+  width: 7.8rem;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+    rgba(255, 255, 255, 0.04);
+  box-shadow:
+    0 1rem 2rem rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.cast-card-art img,
+.cast-card-fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.cast-card-art img {
+  object-fit: cover;
+}
+
+.cast-card-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #68abff, #ffd166);
+  color: #08101b;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.cast-card-copy {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: center;
+}
+
+.cast-card-copy strong,
+.cast-card-copy span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cast-card-copy strong {
+  color: #eef4ff;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.cast-card-copy span {
+  color: #96a4bd;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .title-details-body.has-embedded-player .title-seasons-panel {
