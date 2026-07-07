@@ -938,12 +938,21 @@ img {
   top: 1.25rem;
   right: 1.25rem;
   z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
   border: 0;
   border-radius: 999px;
-  padding: 0.65rem 0.9rem;
+  padding: 0;
   background: rgba(6, 8, 14, 0.72);
   color: #eef4ff;
+  font-size: 1.45rem;
+  line-height: 1;
+  text-indent: 0.06rem;
+  padding-bottom: 0.06rem;
 }
+
 
 .omniarr-modal-close {
   top: 1.5rem;
@@ -1537,6 +1546,7 @@ img {
 }
 
 .episode-card-art {
+  position: relative;
   overflow: hidden;
   border-radius: 0.95rem;
   aspect-ratio: 16 / 9;
@@ -1546,10 +1556,152 @@ img {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+.episode-card-art::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(90deg, #68abff, #ffd166);
+  opacity: 0;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.episode-card.is-next-up .episode-card-art::before {
+  opacity: 1;
+}
+
+.episode-card.is-next-up.has-progress .episode-card-art::before {
+  inset: 0;
+  padding: 2px 2px 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  box-shadow: none;
+}
+
 .episode-card-art img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.episode-card-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 0.32rem;
+  background: rgba(5, 8, 14, 0.58);
+}
+
+.episode-card-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #68abff, #ffd166);
+  box-shadow: 0 0 1rem rgba(104, 171, 255, 0.45);
+}
+
+.episode-card-progress-glow {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 1;
+  height: 38%;
+  background: linear-gradient(180deg, rgba(104, 171, 255, 0), rgba(104, 171, 255, 0.16));
+}
+
+.episode-card-title-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.episode-card-title-row strong {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.episode-card-state-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  flex: 0 0 auto;
+}
+
+.episode-card-watch-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.episode-card-watch-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(244, 247, 255, 0.9);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.episode-card-watch-toggle.is-watched {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: transparent;
+}
+
+.episode-card-watch-toggle.is-watched svg {
+  opacity: 1;
+}
+
+.episode-card:hover .episode-card-watch-toggle,
+.episode-card:focus-visible .episode-card-watch-toggle,
+.episode-card-watch-toggle:focus-visible {
+  opacity: 1;
+}
+
+.episode-card:hover .episode-card-watch-toggle:not(.is-watched),
+.episode-card:focus-visible .episode-card-watch-toggle:not(.is-watched),
+.episode-card-watch-toggle:not(.is-watched):focus-visible {
+  border-style: dashed;
+  border-color: rgba(244, 247, 255, 0.44);
+}
+
+.episode-card-watch-toggle:hover,
+.episode-card-watch-toggle:focus-visible {
+  transform: scale(1.04);
+  background: rgba(7, 10, 16, 0.36);
+}
+
+.episode-card-watch-toggle.is-watched:hover,
+.episode-card-watch-toggle.is-watched:focus-visible {
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.episode-card-watch-toggle:not(.is-watched):hover,
+.episode-card-watch-toggle:not(.is-watched):focus-visible {
+  border-style: dashed;
+  border-color: rgba(244, 247, 255, 0.52);
+}
+
+.episode-card-watch-toggle:disabled {
+  opacity: 0.6;
 }
 
 .episode-card:hover .episode-card-art,
@@ -1794,7 +1946,10 @@ img {
   color: #dbe2ee;
   font-size: 1.1rem;
   line-height: 1;
+  text-indent: 0.06rem;
+  padding-bottom: 0.06rem;
 }
+
 
 .empty-state {
   padding: 1.5rem;

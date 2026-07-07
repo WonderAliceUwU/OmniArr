@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { defaultConfig, type AppConfig, type AuthPayload, type TitleDetailsRequest } from '../shared/contracts.js';
+import { defaultConfig, type AppConfig, type AuthPayload, type EpisodeWatchStateRequest, type TitleDetailsRequest } from '../shared/contracts.js';
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
 import { loadState, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
 import {
@@ -17,6 +17,7 @@ import {
   removeDownload,
   requestMovie,
   requestSeries,
+  setEpisodeWatchState,
   sanitizeConfig
 } from './lib/services.js';
 
@@ -221,6 +222,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<TitleDetailsRequest>(request);
     sendJson(response, 200, await getTitleDetails(config, body));
+    return;
+  }
+
+  if (url.pathname === '/api/episodes/watch-state' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<EpisodeWatchStateRequest>(request);
+    await setEpisodeWatchState(config, body);
+    sendJson(response, 200, { ok: true });
     return;
   }
 

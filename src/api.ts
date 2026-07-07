@@ -8,6 +8,7 @@ import type {
   MediaCard,
   ServiceOptionsResponse,
   SessionResponse,
+  EpisodeWatchStateRequest,
   TitleDetailsRequest,
   TitleDetailsResponse
 } from '../shared/contracts'
@@ -82,6 +83,11 @@ export const api = {
     request<TitleDetailsResponse>('/api/title-details', {
       method: 'POST',
       body: JSON.stringify({ card, seasonId } satisfies TitleDetailsRequest),
+    }),
+  setEpisodeWatchState: (payload: EpisodeWatchStateRequest) =>
+    request<{ ok: boolean }>('/api/episodes/watch-state', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   getDownloads: () => request<DownloadItem[]>('/api/downloads'),
   deleteDownload: (payload: { id: string }) =>
