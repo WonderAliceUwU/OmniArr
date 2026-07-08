@@ -1607,12 +1607,12 @@ function TitleDetailsModal(props: {
                       ) : null}
                     </p>
                     <div className="title-details-summary-header">
-                      {canPlay ? (
+                      {canPlay && details?.mediaType !== 'series' ? (
                         <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} type="button">
                           <PlayGlyph />
                           <span>Play</span>
                         </button>
-                      ) : canRequest ? (
+                      ) : canRequest && details?.mediaType !== 'series' ? (
                         <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
                           <DownloadGlyph />
                           <span>Request</span>
@@ -1712,6 +1712,18 @@ function TitleDetailsModal(props: {
                                 ) : null}
                               </div>
                             ) : null}
+                        <div className="title-season-strip-spacer" />
+                        {canPlay ? (
+                          <button
+                            aria-label={`Play ${playLabel}`}
+                            className="secondary-button title-action-button title-action-button-play title-season-play-button"
+                            onClick={() => setPlayerTarget({ id: playId!, title: playLabel })}
+                            type="button"
+                          >
+                            <PlayGlyph />
+                            <span>Play</span>
+                          </button>
+                        ) : null}
                         {hasNextSeason ? (
                           <button
                             aria-label="Next season"
@@ -1952,7 +1964,8 @@ function DownloadGlyph() {
 function TrashGlyph() {
   return (
     <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
-      <path d="M5.5 3.25h5l.55 1.25H13v1.25h-1v6.5A1.75 1.75 0 0 1 10.25 14h-4.5A1.75 1.75 0 0 1 4 12.25v-6.5H3V4.5h1.95l.55-1.25Zm-.25 2.5v6.5c0 .28.22.5.5.5h4.5c.28 0 .5-.22.5-.5v-6.5h-5.5ZM6.75 7h1.25v4h-1.25V7Zm2.25 0h1.25v4H9V7Z" fill="currentColor" />
+      <circle cx="8" cy="8" fill="none" r="5.35" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.95 5.95 10.05 10.05M10.05 5.95 5.95 10.05" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
     </svg>
   )
 }
