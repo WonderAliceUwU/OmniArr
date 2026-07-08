@@ -2,6 +2,7 @@ import type {
   AppConfig,
   AuthPayload,
   AuthResponse,
+  CalendarResponse,
   DashboardResponse,
   DownloadItem,
   HubPageResponse,
@@ -81,6 +82,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
+  getCalendar: () => request<CalendarResponse>('/api/calendar'),
   getHub: (page: HubPageResponse['page']) => request<HubPageResponse>(`/api/hubs/${page}`),
   getTitleDetails: (card: MediaCard, seasonId?: string) =>
     request<TitleDetailsResponse>('/api/title-details', {

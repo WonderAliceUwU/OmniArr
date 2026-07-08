@@ -14,6 +14,7 @@ import {
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
 import { loadState, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
 import {
+  getCalendar,
   getConnectionStatuses,
   getDashboard,
   getDownloads,
@@ -227,6 +228,12 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
   if (url.pathname === '/api/downloads' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
     sendJson(response, 200, await getDownloads(config));
+    return;
+  }
+
+  if (url.pathname === '/api/calendar' && method === 'GET') {
+    const config = await readConfig(session!.encryptionKey);
+    sendJson(response, 200, await getCalendar(config));
     return;
   }
 
