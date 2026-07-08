@@ -19,6 +19,7 @@ import {
   getDashboard,
   getDownloads,
   getHubPage,
+  searchTitles,
   getTitleDetails,
   getTmdbLogos,
   deleteSeasonFiles,
@@ -234,6 +235,13 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
   if (url.pathname === '/api/calendar' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
     sendJson(response, 200, await getCalendar(config));
+    return;
+  }
+
+  if (url.pathname === '/api/search' && method === 'GET') {
+    const config = await readConfig(session!.encryptionKey);
+    const query = String(url.searchParams.get('query') || '');
+    sendJson(response, 200, await searchTitles(config, query));
     return;
   }
 

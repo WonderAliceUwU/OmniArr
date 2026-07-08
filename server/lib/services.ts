@@ -129,6 +129,11 @@ interface DownloadMetadataHint {
   subtitle?: string;
 }
 
+interface TmdbBackdropChoice {
+  url: string;
+  backdropLanguageFallback: boolean;
+}
+
 interface SonarrSeriesRecord {
   id?: number;
   title?: string;
@@ -333,7 +338,7 @@ export async function getHubPage(
     return getHubPage(config, 'home');
   }
 
-  const backdropCache = new Map<string, Promise<string>>();
+  const backdropCache = new Map<string, Promise<TmdbBackdropChoice>>();
   const networkScopedContinueWatching = isNetworkPage
     ? (() => {
         const sectionTmdbIds = new Set(
@@ -369,13 +374,15 @@ export async function getHubPage(
       'en'
     )
   ]);
+  const continueWatchingWithLogos = await applyTitleLogosToCards(config, continueWatching || []);
   const heroWithLogos = await applyTitleLogosToCards(config, heroWithHighResBackdrops || []);
+  const sectionsWithLogos = await applyTitleLogosToSections(config, sectionsWithHighResBackdrops || []);
 
   return {
     page,
     hero: heroWithLogos,
-    continueWatching,
-    sections: (sectionsWithHighResBackdrops || [])
+    continueWatching: continueWatchingWithLogos,
+    sections: sectionsWithLogos
       .filter((section) => section.items.some((item) => item.backdropUrl || item.posterUrl))
       .concat(
       page === 'library' && downloads.length
@@ -460,7 +467,7 @@ export async function getCalendar(config: AppConfig): Promise<CalendarResponse> 
   const allItems = [...sonarrItems, ...radarrItems]
       .filter((item): item is CalendarEntry => Boolean(item));
 
-  const backdropCache = new Map<string, Promise<string>>();
+  const backdropCache = new Map<string, Promise<TmdbBackdropChoice>>();
   const cards = await applyHighResBackdropsToCards(config, allItems.map(i => i.card), shouldUseHighResBackdropForCard, backdropCache, 'en');
 
   const itemsWithBackdrops = allItems.map(item => {
@@ -479,6 +486,73 @@ export async function getCalendar(config: AppConfig): Promise<CalendarResponse> 
     items: itemsWithBackdrops
       .sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime())
   }
+}
+
+export async function searchTitles(
+  config: AppConfig,
+  rawQuery: string
+): Promise<{ query: string; items: MediaCard[] }> {
+  const query = rawQuery.trim();
+  if (!query) {
+    return { query: '', items: [] };
+  }
+
+  const library = await getLibrarySnapshot(config);
+  const libraryCards = library.allItems
+    .map((item) => jellyfinToCard(item, item.Name || 'Library'))
+    .filter(Boolean) as MediaCard[];
+  const normalizedQuery = normalizeSearchValue(query);
+  const libraryMatches = libraryCards.filter((card) => {
+    const haystack = normalizeSearchValue([card.title, card.subtitle].filter(Boolean).join(' '));
+    return haystack.includes(normalizedQuery);
+  });
+
+  const libraryCardByTmdbId = new Map(
+    libraryCards
+      .filter((card) => card.tmdbId)
+      .map((card) => [card.tmdbId!, card] as const)
+  );
+
+  const remoteResults = await tmdbFetch(
+    config,
+    `/search/multi?query=${encodeURIComponent(query)}&language=${encodeURIComponent(config.preferences.language)}&include_adult=false`
+  );
+
+  const remoteCards = asArray(remoteResults?.results)
+    .map((entry) => asRecord(entry))
+    .filter((entry) => entry.media_type === 'movie' || entry.media_type === 'tv')
+    .map((entry) => {
+      const mediaType = entry.media_type === 'movie' ? 'movie' : 'tv';
+      const card = tmdbToCard(entry, mediaType);
+      const libraryMatch = card.tmdbId ? libraryCardByTmdbId.get(card.tmdbId) : undefined;
+      return libraryMatch
+        ? {
+            ...card,
+            providerId: libraryMatch.providerId,
+            badge: libraryMatch.badge,
+            progress: libraryMatch.progress,
+            secondaryValue: libraryMatch.secondaryValue,
+            hoverLabel: libraryMatch.hoverLabel
+          }
+        : card;
+    });
+
+  const searchBackdropCache = new Map<string, Promise<TmdbBackdropChoice>>();
+  const enrichedCards = await applyTitleLogosToCards(
+    config,
+    await applyHighResBackdropsToCards(
+      config,
+      uniqueSearchCards([...libraryMatches, ...remoteCards]).slice(0, 36),
+      shouldUseHighResBackdropForCard,
+      searchBackdropCache,
+      'en'
+    )
+  );
+
+  return {
+    query,
+    items: enrichedCards.filter((card) => Boolean(card.backdropUrl))
+  };
 }
 
 export async function removeDownload(config: AppConfig, id: string): Promise<void> {
@@ -1777,7 +1851,7 @@ async function getLibrarySnapshot(config: AppConfig): Promise<{
       jellyfinFetch<JellyfinItem[]>(config, `/Shows/NextUp?userId=${config.jellyfin.userId}&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber`),
       jellyfinFetch<JellyfinItem[]>(
         config,
-        `/Users/${config.jellyfin.userId}/Items?recursive=true&includeItemTypes=Movie,Series&hasTmdbId=true&fields=ProviderIds,DateCreated,DateLastMediaAdded,Overview`
+        `/Users/${config.jellyfin.userId}/Items?recursive=true&includeItemTypes=Movie,Series&hasTmdbId=true&fields=ProviderIds,DateCreated,DateLastMediaAdded,Overview,ImageTags,BackdropImageTags,ProductionYear`
       )
     ]);
   } catch {
@@ -2741,6 +2815,7 @@ function customCard(partial: Partial<MediaCard> & Pick<MediaCard, 'id' | 'title'
     posterUrl: partial.posterUrl || '',
     backdropUrl: partial.backdropUrl || partial.posterUrl || '',
     logoUrl: partial.logoUrl,
+    backdropLanguageFallback: partial.backdropLanguageFallback,
     badge: partial.badge,
     progress: partial.progress,
     secondaryValue: partial.secondaryValue,
@@ -2859,11 +2934,35 @@ function uniqueCards(items: MediaCard[]): MediaCard[] {
   });
 }
 
+function uniqueSearchCards(items: MediaCard[]): MediaCard[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = item.tmdbId
+      ? `tmdb:${item.tmdbId}`
+      : item.providerId
+        ? `provider:${item.providerId}`
+        : item.id;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeSearchValue(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 // Match TMDb's English backdrop tab for landscape cards where available.
 async function applyHighResBackdropsToSections(
   config: AppConfig,
   sections: HubSection[],
-  backdropCache: Map<string, Promise<string>>,
+  backdropCache: Map<string, Promise<TmdbBackdropChoice>>,
   preferredLanguage?: string | null
 ): Promise<HubSection[]> {
   return Promise.all(
@@ -2888,11 +2987,31 @@ async function applyHighResBackdropsToSections(
   );
 }
 
+async function applyTitleLogosToSections(
+  config: AppConfig,
+  sections: HubSection[]
+): Promise<HubSection[]> {
+  return Promise.all(
+    sections.map(async (section) => {
+      if (section.style !== 'landscape') {
+        return section;
+      }
+
+      const items = await applyTitleLogosToCards(config, section.items);
+
+      return {
+        ...section,
+        items
+      };
+    })
+  );
+}
+
 async function applyHighResBackdropsToCards(
   config: AppConfig,
   cards: MediaCard[],
   shouldApply: (card: MediaCard) => boolean,
-  backdropCache: Map<string, Promise<string>>,
+  backdropCache: Map<string, Promise<TmdbBackdropChoice>>,
   preferredLanguage?: string | null
 ): Promise<MediaCard[]> {
   return Promise.all(
@@ -2905,15 +3024,16 @@ async function applyHighResBackdropsToCards(
       const cacheKey = `${mediaType}:${card.tmdbId}:${preferredLanguage || 'any'}:${card.originalLanguage || 'none'}`;
       let backdropPromise = backdropCache.get(cacheKey);
       if (!backdropPromise) {
-        backdropPromise = getTmdbHighResBackdrop(config, card.tmdbId!, mediaType, preferredLanguage, card.originalLanguage);
+        backdropPromise = getTmdbHighResBackdropChoice(config, card.tmdbId!, mediaType, preferredLanguage, card.originalLanguage);
         backdropCache.set(cacheKey, backdropPromise);
       }
 
-      const backdropUrl = await backdropPromise;
-      return backdropUrl
+      const backdropChoice = await backdropPromise;
+      return backdropChoice.url
         ? {
             ...card,
-            backdropUrl
+            backdropUrl: backdropChoice.url,
+            backdropLanguageFallback: backdropChoice.backdropLanguageFallback
           }
         : card;
     })
@@ -3032,13 +3152,24 @@ async function getTmdbHighResBackdrop(
   preferredLanguage?: string | null,
   originalLanguage?: string | null
 ): Promise<string> {
+  const choice = await getTmdbHighResBackdropChoice(config, tmdbId, mediaType, preferredLanguage, originalLanguage);
+  return choice.url;
+}
+
+async function getTmdbHighResBackdropChoice(
+  config: AppConfig,
+  tmdbId: number,
+  mediaType: 'movie' | 'tv',
+  preferredLanguage?: string | null,
+  originalLanguage?: string | null
+): Promise<{ url: string; backdropLanguageFallback: boolean }> {
   try {
     const response = await tmdbFetch(config, tmdbBackdropImagesPath(tmdbId, mediaType));
     let backdrops = asArray(response?.backdrops)
       .map((entry) => asRecord(entry));
     
     if (backdrops.length === 0) {
-      return '';
+      return { url: '', backdropLanguageFallback: false };
     }
 
     const sortByWidthDesc = (items: Record<string, unknown>[]) =>
@@ -3083,9 +3214,14 @@ async function getTmdbHighResBackdrop(
       (entry) => typeof entry.file_path === 'string' && entry.file_path
     );
 
-    return selectedBackdrop?.file_path ? `${TMDB_IMAGE}/original${String(selectedBackdrop.file_path)}` : '';
+    return selectedBackdrop?.file_path
+      ? {
+          url: `${TMDB_IMAGE}/original${String(selectedBackdrop.file_path)}`,
+          backdropLanguageFallback: preferredLanguage === 'en' && selectedBackdrop.iso_639_1 == null
+        }
+      : { url: '', backdropLanguageFallback: false };
   } catch {
-    return '';
+    return { url: '', backdropLanguageFallback: false };
   }
 }
 

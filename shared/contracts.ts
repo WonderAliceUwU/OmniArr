@@ -1,6 +1,7 @@
 export type AppRoute =
   | 'stream'
   | 'home'
+  | 'search'
   | 'anime'
   | 'dorama'
   | 'netflix'
@@ -90,6 +91,7 @@ export interface MediaCard {
   posterUrl: string;
   backdropUrl: string;
   logoUrl?: string;
+  backdropLanguageFallback?: boolean;
   badge?: string;
   progress?: number;
   secondaryValue?: string;
@@ -205,6 +207,11 @@ export interface CalendarEntry {
 
 export interface CalendarResponse {
   items: CalendarEntry[];
+}
+
+export interface SearchResponse {
+  query: string;
+  items: MediaCard[];
 }
 
 export interface DashboardResponse {

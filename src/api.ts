@@ -7,6 +7,7 @@ import type {
   DownloadItem,
   HubPageResponse,
   MediaCard,
+  SearchResponse,
   ServiceOptionsResponse,
   SessionResponse,
   EpisodeWatchStateRequest,
@@ -84,6 +85,7 @@ export const api = {
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
   getCalendar: () => request<CalendarResponse>('/api/calendar'),
   getHub: (page: HubPageResponse['page']) => request<HubPageResponse>(`/api/hubs/${page}`),
+  searchTitles: (query: string) => request<SearchResponse>(`/api/search?query=${encodeURIComponent(query)}`),
   getTitleDetails: (card: MediaCard, seasonId?: string) =>
     request<TitleDetailsResponse>('/api/title-details', {
       method: 'POST',

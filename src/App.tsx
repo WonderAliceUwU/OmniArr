@@ -19,6 +19,7 @@ import {
   type DownloadItem,
   type HubPageResponse,
   type MediaCard,
+  type SearchResponse,
   type SelectOption,
   type ServiceOptionsResponse,
   type TitleDetailsCastMember,
@@ -36,8 +37,9 @@ const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
 const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
 const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
 
-const sidebarItems: Array<{ route: AppRoute; label: string; short: string; icon?: 'calendar' }> = [
+const sidebarItems: Array<{ route: AppRoute; label: string; short: string; icon?: 'calendar' | 'search'; iconClassName?: string }> = [
   { route: 'home', label: 'Inicio', short: 'H' },
+  { route: 'search', label: 'Search', short: 'S', icon: 'search', iconClassName: 'sidebar-search-icon' },
   { route: 'dorama', label: 'K-Drama', short: 'K' },
   { route: 'anime', label: 'Anime', short: 'A' },
   { route: 'library', label: 'Library', short: 'L' },
@@ -77,6 +79,10 @@ function App() {
   const [hubLoading, setHubLoading] = useState(false)
   const [calendarItems, setCalendarItems] = useState<CalendarEntry[]>([])
   const [calendarLoading, setCalendarLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResponse['items']>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [lastSearchQuery, setLastSearchQuery] = useState('')
   const [selectedCard, setSelectedCard] = useState<SelectedCardState | null>(null)
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
   const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
@@ -190,7 +196,7 @@ function App() {
       return
     }
 
-    if (route === 'downloads' || route === 'settings' || route === 'calendar') {
+    if (route === 'downloads' || route === 'settings' || route === 'calendar' || route === 'search') {
       return
     }
 
@@ -234,7 +240,7 @@ function App() {
       void refreshBaseData()
       if (route === 'calendar') {
         void loadCalendar({ silent: true })
-      } else if (route !== 'downloads' && route !== 'settings') {
+      } else if (route !== 'downloads' && route !== 'settings' && route !== 'search') {
         void loadHub(route as HubPageResponse['page'], { silent: true })
       }
     }, 30000)
@@ -338,7 +344,7 @@ function App() {
       }
       if (route === 'calendar') {
         await loadCalendar({ silent: true })
-      } else if (route !== 'downloads' && route !== 'settings') {
+      } else if (route !== 'downloads' && route !== 'settings' && route !== 'search') {
         await loadHub(route as HubPageResponse['page'], { silent: true })
       }
       setNotice(`${card.title} sent to ${card.mediaType === 'movie' ? 'Radarr' : 'Sonarr'}.`)
@@ -362,6 +368,29 @@ function App() {
       setError(deleteError instanceof Error ? deleteError.message : 'Failed to remove the download.')
     } finally {
       setDownloadDeleteId('')
+    }
+  }
+
+  async function handleSearchSubmit(query: string) {
+    const trimmedQuery = query.trim()
+    setSearchQuery(query)
+    setError('')
+
+    if (!trimmedQuery) {
+      setLastSearchQuery('')
+      setSearchResults([])
+      return
+    }
+
+    setSearchLoading(true)
+    try {
+      const response = await api.searchTitles(trimmedQuery)
+      setSearchResults(response.items)
+      setLastSearchQuery(response.query)
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : 'Failed to search the catalog.')
+    } finally {
+      setSearchLoading(false)
     }
   }
 
@@ -427,7 +456,7 @@ function App() {
 
   const currentJellyfinUser =
     options.jellyfinUsers.find((option) => option.id === config.jellyfin.userId)?.label || 'Media cockpit'
-  const currentHub = route !== 'downloads' && route !== 'settings' && route !== 'calendar' ? hubPages[route as HubPageResponse['page']] : undefined
+  const currentHub = route !== 'downloads' && route !== 'settings' && route !== 'calendar' && route !== 'search' ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
     <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
@@ -450,6 +479,17 @@ function App() {
 
             {route === 'calendar' ? <CalendarPage entries={calendarItems} loading={calendarLoading} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
             {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} downloads={downloads} onDelete={handleDeleteDownload} /> : null}
+            {route === 'search' ? (
+              <SearchPage
+                loading={searchLoading}
+                onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })}
+                onSearch={handleSearchSubmit}
+                query={searchQuery}
+                results={searchResults}
+                submittedQuery={lastSearchQuery}
+                updateQuery={setSearchQuery}
+              />
+            ) : null}
             {route === 'settings' ? (
               <SettingsView
                 busy={busy}
@@ -462,7 +502,7 @@ function App() {
                 updateConfig={updateConfig}
               />
             ) : null}
-            {route !== 'downloads' && route !== 'settings' && route !== 'calendar' ? (
+            {route !== 'downloads' && route !== 'settings' && route !== 'calendar' && route !== 'search' ? (
               <HubPageView
                 busy={busy}
                 hub={currentHub}
@@ -527,8 +567,8 @@ function Sidebar(props: {
               onClick={() => startTransition(() => props.setRoute(item.route))}
               type="button"
             >
-              <span className="sidebar-link-short" aria-hidden="true">
-                {item.icon === 'calendar' ? <CalendarGlyph /> : item.short}
+              <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.short}
               </span>
               <span>{item.label}</span>
             </button>
@@ -576,6 +616,51 @@ function LoadingScreen() {
       <div className="loading-orb" />
       <p>Preparing OmniArr…</p>
     </div>
+  )
+}
+
+function SearchGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.25 10.25L13.1 13.1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function ArrowRightGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <path d="M3 8H13" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+      <path d="M9.25 4.25L13 8L9.25 11.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+function ActionButton(props: {
+  children: ReactNode
+  className?: string
+  disabled?: boolean
+  onClick?: () => void
+  type?: 'button' | 'submit'
+  variant?: 'default' | 'play'
+}) {
+  const className = [
+    'secondary-button',
+    'title-action-button',
+    props.variant === 'play' ? 'title-action-button-play' : '',
+    props.className || '',
+  ].filter(Boolean).join(' ')
+
+  return (
+    <button
+      className={className}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      type={props.type || 'button'}
+    >
+      {props.children}
+    </button>
   )
 }
 
@@ -1048,9 +1133,11 @@ function MediaTile(props: {
     ? (props.card.backdropUrl || props.card.posterUrl)
     : props.card.posterUrl
   const continueEpisodeMeta = props.isContinueWatching ? parseContinueEpisodeMeta(props.card) : null
+  const showLandscapeLogo = (props.styleType === 'landscape' || props.styleType === 'episode') && props.card.logoUrl && props.card.backdropLanguageFallback
   const tileClassName = [
     'media-tile',
     props.styleType,
+    showLandscapeLogo ? 'has-landscape-logo' : '',
     props.isContinueWatching ? 'continue-tile' : '',
     props.isContinueWatching && props.card.progress ? 'has-progress' : '',
   ].filter(Boolean).join(' ')
@@ -1066,6 +1153,11 @@ function MediaTile(props: {
         type="button"
       >
         {imageUrl ? <img alt={props.card.title} loading="lazy" src={imageUrl} /> : <div className="media-fallback" />}
+        {showLandscapeLogo ? (
+          <div className="media-landscape-logo-wrap">
+            <img alt="" className="media-landscape-logo" loading="lazy" src={props.card.logoUrl} />
+          </div>
+        ) : null}
         {continueEpisodeMeta ? (
           <div className="continue-episode-meta">
             <span className="continue-episode-meta-primary">{`Season ${continueEpisodeMeta.seasonNumber}`}</span>
@@ -1652,10 +1744,10 @@ function TitleDetailsModal(props: {
                     </p>
                     <div className="title-details-summary-header">
                       {canPlay && details?.mediaType !== 'series' ? (
-                        <button className="secondary-button title-action-button title-action-button-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} type="button">
+                        <ActionButton onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
                           <PlayGlyph />
                           <span>Play</span>
-                        </button>
+                        </ActionButton>
                       ) : canRequest && details?.mediaType !== 'series' ? (
                         <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
                           <DownloadGlyph />
@@ -1758,15 +1850,14 @@ function TitleDetailsModal(props: {
                             ) : null}
                         <div className="title-season-strip-spacer" />
                         {canPlay ? (
-                          <button
-                            aria-label={`Play ${playLabel}`}
-                            className="secondary-button title-action-button title-action-button-play title-season-play-button"
+                          <ActionButton
+                            className="title-season-play-button"
                             onClick={() => setPlayerTarget({ id: playId!, title: playLabel })}
-                            type="button"
+                            variant="play"
                           >
                             <PlayGlyph />
                             <span>Play</span>
-                          </button>
+                          </ActionButton>
                         ) : null}
                         {hasNextSeason ? (
                           <button
@@ -2056,6 +2147,78 @@ function truncateOverview(text: string, maxLength: number) {
   return `${(safeBreak > maxLength * 0.7 ? clipped.slice(0, safeBreak) : clipped).trimEnd()}...`
 }
 
+function SearchPage(props: {
+  loading: boolean
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
+  onSearch: (query: string) => Promise<void>
+  query: string
+  results: MediaCard[]
+  submittedQuery: string
+  updateQuery: (query: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const hasSearched = Boolean(props.submittedQuery)
+
+  return (
+    <div className="search-page">
+      <section className="search-header">
+        <h2><SearchGlyph /> <span>Search</span></h2>
+        <form
+          className="search-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void props.onSearch(props.query)
+          }}
+        >
+          <input
+            className="input search-input"
+            onChange={(event) => props.updateQuery(event.target.value)}
+            placeholder="Search movies and shows"
+            ref={inputRef}
+            type="search"
+            value={props.query}
+          />
+          <ActionButton className="search-submit-button" disabled={props.loading || props.query.trim().length < 2} type="submit" variant="play">
+            <ArrowRightGlyph />
+          </ActionButton>
+        </form>
+      </section>
+
+      {props.loading ? <LoadingHub /> : null}
+
+      {hasSearched && !props.loading && props.results.length === 0 ? (
+        <EmptyState
+          copy={`No results found for "${props.submittedQuery}". Try another title or a broader query.`}
+          title="Nothing matched"
+        />
+      ) : null}
+
+      {props.results.length ? (
+        <section className="search-results-section">
+          <div className="search-results-grid">
+            {props.results.map((card) => (
+              <MediaTile
+                busy={false}
+                key={card.id}
+                card={card}
+                isContinueWatching={false}
+                onOpenCard={props.onOpenCard}
+                onRequest={async () => {}}
+                styleType="landscape"
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  )
+}
+
 function DownloadsPage(props: {
   downloads: DownloadItem[]
   busyId: string
@@ -2064,7 +2227,7 @@ function DownloadsPage(props: {
   return (
     <div className="downloads-page">
       <div className="downloads-header">
-        <h2>Downloads</h2>
+        <h2><DownloadGlyph /> <span>Downloads</span></h2>
       </div>
       <section className="downloads-section">
         <div className="downloads-grid">
@@ -2363,11 +2526,11 @@ function ServiceFields(props: {
   )
 }
 
-function EmptyState({ title, copy }: { title: string; copy: string }) {
+function EmptyState({ title, copy, className }: { title: string; copy: string; className?: string }) {
   return (
-    <div className="empty-state">
+    <div className={className ? `empty-state ${className}` : 'empty-state'}>
       <h4>{title}</h4>
-      <p>{copy}</p>
+      {copy ? <p>{copy}</p> : null}
     </div>
   )
 }
