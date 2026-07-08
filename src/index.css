@@ -1283,16 +1283,16 @@ img {
   top: 0;
   left: 0;
   right: 0;
-  height: 62%;
+  height: 70%;
   background-size: cover;
-  background-position: center center;
+  background-position: center top;
   background-repeat: no-repeat;
 }
 
 .title-details-darken {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 40%, #090b10 95%);
+  background: linear-gradient(180deg, transparent 20%, #090b10 100%);
 }
 
 .title-details-shell {
@@ -1389,16 +1389,7 @@ img {
 }
 
 .title-details-body::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 8rem;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(9, 11, 16, 0) 0%, rgba(9, 11, 16, 0.08) 30%, rgba(9, 11, 16, 0.18) 55%, rgba(9, 11, 16, 0.34) 78%, rgba(9, 11, 16, 0.5) 100%);
-  filter: blur(16px);
-  opacity: 0.95;
+  display: none;
 }
 
 .title-details-body .title-details-shell {
@@ -1597,6 +1588,11 @@ img {
   padding: 0;
 }
 
+.title-season-strip-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .title-season-nav {
   position: relative;
   width: 2rem;
@@ -1632,6 +1628,11 @@ img {
 
 .title-season-nav:disabled {
   opacity: 0.26;
+}
+
+.title-season-play-button {
+  margin-top: 0;
+  flex: 0 0 auto;
 }
 
 .title-season-selector {
