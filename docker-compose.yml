@@ -1,8 +1,11 @@
 services:
   omniarr:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: wonderalice/aliceserver:latest
+    # Para usar una versión específica, cambia 'latest' por el tag (ej: wonderalice/aliceserver:1.0.0)
+    # Para construir desde código fuente en su lugar, descomenta las siguientes líneas:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: omniarr
     restart: unless-stopped
     ports:

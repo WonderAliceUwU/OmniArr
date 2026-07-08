@@ -1849,7 +1849,7 @@ function TitleDetailsModal(props: {
                                   >
                                     <span
                                       className="title-season-progress-ring"
-                                      style={{ ['--season-download-progress' as '--season-download-progress']: `${activeSeasonMeta?.downloadProgress || 0}` }}
+                                      style={{ '--season-download-progress': `${activeSeasonMeta?.downloadProgress || 0}` } as React.CSSProperties}
                                     />
                                     <span className="title-season-progress-percent">{`${activeSeasonMeta?.downloadProgress || 0}%`}</span>
                                   </div>
@@ -1993,7 +1993,7 @@ function TitleDetailsModal(props: {
                                     >
                                       <span
                                         className="episode-card-availability-ring"
-                                        style={{ ['--episode-download-progress' as '--episode-download-progress']: `${episode.downloadProgress || 0}` }}
+                                        style={{ '--episode-download-progress': `${episode.downloadProgress || 0}` } as React.CSSProperties}
                                       />
                                       <span className="episode-card-availability-percent">{`${episode.downloadProgress || 0}%`}</span>
                                     </span>
