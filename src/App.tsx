@@ -574,7 +574,6 @@ function AuthScreen({
     <div className={isSetup ? 'auth-layout' : 'auth-layout auth-layout-login'}>
       <section className={isSetup ? 'auth-panel' : 'auth-panel auth-panel-login'}>
         <div className="auth-panel-shell">
-          <p className="eyebrow">{isSetup ? 'First boot' : 'Secure access'}</p>
           <h1>{isSetup ? 'Create your master password' : 'Sign in to OmniArr'}</h1>
           <p className="auth-copy">
             {isSetup
@@ -1048,6 +1047,7 @@ function TitleDetailsModal(props: {
   const [detailsError, setDetailsError] = useState('')
   const [activeSeasonId, setActiveSeasonId] = useState<string | undefined>(undefined)
   const [episodeWatchBusyId, setEpisodeWatchBusyId] = useState<string | null>(null)
+  const [episodeDownloadBusyId, setEpisodeDownloadBusyId] = useState<string | null>(null)
   const [seasonActionBusy, setSeasonActionBusy] = useState<'download' | 'delete' | null>(null)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
@@ -1110,6 +1110,7 @@ function TitleDetailsModal(props: {
     setDetailsError('')
     setActiveSeasonId(undefined)
     setEpisodeWatchBusyId(null)
+    setEpisodeDownloadBusyId(null)
     setSeasonActionBusy(null)
     setPlayerTarget(null)
     setIsOverviewExpanded(false)
@@ -1340,6 +1341,28 @@ function TitleDetailsModal(props: {
     }
   }, [activeSeasonDownloadStatus, details, seasonValue])
 
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series') {
+      return
+    }
+
+    const hasEpisodeTransfers = details.episodes.some((episode) =>
+      episode.downloadStatus === 'processing' || episode.downloadStatus === 'downloading'
+    )
+
+    if (!hasEpisodeTransfers) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshSeasonState(seasonValue || undefined)
+    }, 2500)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [details, seasonValue])
+
   function handleRequestClose() {
     if (!props.originRect || transitionState === 'closing') {
       props.onClose()
@@ -1464,6 +1487,42 @@ function TitleDetailsModal(props: {
     } finally {
       setSeasonActionBusy(null)
     }
+  }
+
+  function handleEpisodeDownload(
+    event: MouseEvent<HTMLButtonElement>,
+    episodeId: string,
+    sonarrEpisodeId: number | undefined,
+    availability: TitleDetailsResponse['episodes'][number]['availability']
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (!sonarrEpisodeId || availability === 'downloading' || episodeDownloadBusyId === episodeId) {
+      return
+    }
+
+    setEpisodeDownloadBusyId(episodeId)
+    updateEpisodeInCaches(episodeId, (episode) => ({
+      ...episode,
+      downloadStatus: 'processing',
+      downloadProgress: undefined,
+      canDownload: false,
+    }))
+
+    void api.requestEpisode({ episodeId: sonarrEpisodeId })
+      .catch(() => {
+        updateEpisodeInCaches(episodeId, (episode) => ({
+          ...episode,
+          availability,
+          downloadStatus: 'idle',
+          downloadProgress: undefined,
+          canDownload: availability === 'missing',
+        }))
+      })
+      .finally(() => {
+        setEpisodeDownloadBusyId((current) => current === episodeId ? null : current)
+      })
   }
 
   return (
@@ -1606,16 +1665,17 @@ function TitleDetailsModal(props: {
                                 activeSeasonDownloadStatus === 'downloading' ? (
                                   <div
                                     aria-label="Season downloading"
-                                      className="title-season-progress"
-                                      role="img"
-                                      title={activeSeasonMeta?.downloadLabel || 'Downloading'}
-                                    >
-                                      <div
-                                        className="title-season-progress-bar"
-                                        style={{ width: `${activeSeasonMeta?.downloadProgress || 0}%` }}
-                                      />
-                                    </div>
-                                  ) : activeSeasonDownloadStatus === 'processing' ? (
+                                    className="title-season-progress"
+                                    role="img"
+                                    title={activeSeasonMeta?.downloadLabel || 'Downloading'}
+                                  >
+                                    <span
+                                      className="title-season-progress-ring"
+                                      style={{ ['--season-download-progress' as '--season-download-progress']: `${activeSeasonMeta?.downloadProgress || 0}` }}
+                                    />
+                                    <span className="title-season-progress-percent">{`${activeSeasonMeta?.downloadProgress || 0}%`}</span>
+                                  </div>
+                                ) : activeSeasonDownloadStatus === 'processing' ? (
                                     <div
                                       aria-label="Season processing"
                                       className="title-season-processing"
@@ -1735,15 +1795,45 @@ function TitleDetailsModal(props: {
                               <div className="episode-card-title-row">
                                 <strong>{episode.title}</strong>
                                 <div className="episode-card-state-icons">
-                                  {episode.canDownload || episode.availability === 'downloading' ? (
+                                {episode.canDownload || episode.downloadStatus === 'processing' || episode.downloadStatus === 'downloading' ? (
+                                  episode.downloadStatus === 'downloading' ? (
                                     <span
-                                      aria-label={episode.availability === 'downloading' ? 'Episode downloading' : 'Episode available to download'}
-                                      className={episode.availability === 'downloading' ? 'episode-card-availability is-downloading' : 'episode-card-availability'}
-                                      title={episode.availability === 'downloading' ? 'Downloading' : 'Available to download'}
+                                      aria-label="Episode downloading"
+                                      className="episode-card-availability-progress"
+                                      title={`${episode.downloadProgress || 0}% downloaded`}
+                                    >
+                                      <span
+                                        className="episode-card-availability-ring"
+                                        style={{ ['--episode-download-progress' as '--episode-download-progress']: `${episode.downloadProgress || 0}` }}
+                                      />
+                                      <span className="episode-card-availability-percent">{`${episode.downloadProgress || 0}%`}</span>
+                                    </span>
+                                  ) : episode.downloadStatus === 'processing' ? (
+                                    <span
+                                      aria-label="Episode processing"
+                                      className="episode-card-availability-processing"
+                                      title="Processing"
+                                    >
+                                      <span className="episode-card-processing-spinner" aria-hidden="true" />
+                                    </span>
+                                  ) : (
+                                    <button
+                                      aria-label="Download episode"
+                                      className="episode-card-availability episode-card-availability-button"
+                                      disabled={episodeDownloadBusyId === episode.id}
+                                      onClick={(event) => handleEpisodeDownload(
+                                        event,
+                                        episode.id,
+                                        episode.sonarrEpisodeId,
+                                        episode.availability
+                                      )}
+                                      title="Available to download"
+                                      type="button"
                                     >
                                       <DownloadGlyph />
-                                    </span>
-                                  ) : null}
+                                    </button>
+                                  )
+                                ) : null}
                                   {episode.availableInJellyfin ? (
                                     <button
                                       aria-label={episode.watched ? 'Mark episode as unwatched' : 'Mark episode as watched'}
@@ -1971,7 +2061,7 @@ function DownloadRow(props: {
             </div>
             <button
               aria-label={`Delete ${item.title}`}
-              className="download-delete-button"
+              className="download-action-button download-delete-button"
               disabled={props.busy}
               onClick={confirmDelete}
               type="button"
@@ -1987,6 +2077,7 @@ function DownloadRow(props: {
 
 function humanizeDownloadState(state: string) {
   return state
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase())
 }

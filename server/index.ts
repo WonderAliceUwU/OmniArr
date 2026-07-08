@@ -5,6 +5,7 @@ import {
   defaultConfig,
   type AppConfig,
   type AuthPayload,
+  type EpisodeRequestPayload,
   type EpisodeWatchStateRequest,
   type SeasonDeletePayload,
   type SeasonRequestPayload,
@@ -24,6 +25,7 @@ import {
   loadJellyfinUsers,
   proxyJellyfinImage,
   removeDownload,
+  requestEpisode,
   requestMovie,
   requestSeason,
   requestSeries,
@@ -271,6 +273,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<SeasonRequestPayload>(request);
     await requestSeason(config, body);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/requests/episode' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<EpisodeRequestPayload>(request);
+    await requestEpisode(config, body);
     sendJson(response, 200, { ok: true });
     return;
   }
