@@ -109,6 +109,7 @@ export interface MediaCard {
 
 export interface TitleDetailsEpisode {
   id: string;
+  sonarrEpisodeId?: number;
   seasonId?: string;
   title: string;
   overview: string;
@@ -120,6 +121,8 @@ export interface TitleDetailsEpisode {
   runtimeMinutes?: number;
   availableInJellyfin?: boolean;
   availability?: 'available' | 'downloading' | 'missing' | 'unaired';
+  downloadStatus?: 'idle' | 'processing' | 'downloading';
+  downloadProgress?: number;
   canDownload?: boolean;
   canDelete?: boolean;
   watched?: boolean;
@@ -209,6 +212,10 @@ export interface EpisodeWatchStateRequest {
 export interface SeasonRequestPayload {
   seriesId: number;
   seasonNumber: number;
+}
+
+export interface EpisodeRequestPayload {
+  episodeId: number;
 }
 
 export interface SeasonDeletePayload {

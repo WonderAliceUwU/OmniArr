@@ -9,6 +9,7 @@ import type {
   ServiceOptionsResponse,
   SessionResponse,
   EpisodeWatchStateRequest,
+  EpisodeRequestPayload,
   SeasonDeletePayload,
   SeasonRequestPayload,
   TitleDetailsRequest,
@@ -109,6 +110,11 @@ export const api = {
     }),
   requestSeason: (payload: SeasonRequestPayload) =>
     request<{ ok: boolean }>('/api/requests/season', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  requestEpisode: (payload: EpisodeRequestPayload) =>
+    request<{ ok: boolean }>('/api/requests/episode', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

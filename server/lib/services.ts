@@ -3,6 +3,7 @@ import type {
   ConnectionStatus,
   DashboardResponse,
   DownloadItem,
+  EpisodeRequestPayload,
   EpisodeWatchStateRequest,
   HubPageResponse,
   HubSection,
@@ -1111,11 +1112,13 @@ async function buildSeasonEpisodes(
       const tmdbEpisode = tmdbByEpisodeNumber.get(episodeNumber);
       const jellyfinEpisode = jellyfinByEpisodeNumber.get(episodeNumber);
       const sonarrEpisode = sonarrByEpisodeNumber.get(episodeNumber);
+      const queueEntry = sonarrQueue.find((entry) => entry.episode?.seasonNumber === seasonNumber && entry.episode?.episodeNumber === episodeNumber);
       const airDate = tmdbEpisode?.air_date || sonarrEpisode?.airDateUtc;
       const isReleased = !airDate || new Date(airDate).getTime() <= Date.now();
       const hasFile = Boolean(sonarrEpisode?.hasFile || sonarrEpisode?.episodeFileId);
       const isAvailableInJellyfin = Boolean(jellyfinEpisode?.id);
       const isDownloading = downloadingEpisodes.has(episodeNumber);
+      const isProcessing = Boolean(sonarrEpisode?.id) && !isDownloading && Boolean(sonarrEpisode?.monitored) && availabilityWouldBeMissing(isReleased, isAvailableInJellyfin, hasFile);
       const availability: TitleDetailsEpisode['availability'] = !isReleased
         ? 'unaired'
         : isAvailableInJellyfin || hasFile
@@ -1123,9 +1126,15 @@ async function buildSeasonEpisodes(
           : isDownloading
             ? 'downloading'
             : 'missing';
+      const downloadStatus: TitleDetailsEpisode['downloadStatus'] = isDownloading
+        ? 'downloading'
+        : isProcessing
+          ? 'processing'
+          : 'idle';
 
       return {
         id: jellyfinEpisode?.id || buildEpisodeId(seasonNumber, episodeNumber),
+        sonarrEpisodeId: sonarrEpisode?.id,
         seasonId: season.id,
         title: jellyfinEpisode?.title || sonarrEpisode?.title || tmdbEpisode?.name || `Episode ${episodeNumber}`,
         overview: jellyfinEpisode?.overview || sonarrEpisode?.overview || tmdbEpisode?.overview || '',
@@ -1140,6 +1149,8 @@ async function buildSeasonEpisodes(
         runtimeMinutes: jellyfinEpisode?.runtimeMinutes || tmdbEpisode?.runtime,
         availableInJellyfin: isAvailableInJellyfin,
         availability,
+        downloadStatus,
+        downloadProgress: isDownloading ? getEpisodeQueueProgress(queueEntry) : undefined,
         canDownload: isManagedInSonarr && availability === 'missing',
         canDelete: hasFile,
         watched: jellyfinEpisode?.watched,
@@ -1147,6 +1158,29 @@ async function buildSeasonEpisodes(
         playbackPositionTicks: jellyfinEpisode?.playbackPositionTicks
       };
     });
+}
+
+function availabilityWouldBeMissing(
+  isReleased: boolean,
+  isAvailableInJellyfin: boolean,
+  hasFile: boolean
+) {
+  return isReleased && !isAvailableInJellyfin && !hasFile;
+}
+
+function getEpisodeQueueProgress(entry: SonarrQueueRecord | undefined): number | undefined {
+  if (!entry) {
+    return undefined;
+  }
+
+  const total = Number(entry.size || 0);
+  const left = Number(entry.sizeleft || 0);
+  if (!total || total <= 0) {
+    return undefined;
+  }
+
+  const percent = Math.round(((total - left) / total) * 100);
+  return Math.max(0, Math.min(100, percent));
 }
 
 function buildTitleSeasons(
@@ -1177,7 +1211,9 @@ function buildTitleSeasons(
         ? Math.max(season.episodeCount - availableEpisodeCount, 0)
         : undefined,
       canDownload: false,
-      canDelete: availableEpisodeCount > 0,
+      canDelete: typeof season.episodeCount === 'number'
+        ? availableEpisodeCount >= season.episodeCount
+        : availableEpisodeCount > 0,
       isDownloading,
       downloadStatus: isDownloading ? 'downloading' : isProcessing ? 'processing' : 'idle',
       downloadProgress: isDownloading ? getSeasonQueueProgress(seasonQueue) : undefined,
@@ -1202,7 +1238,7 @@ function buildTitleSeasons(
       availableEpisodeCount: seasonEpisodes.filter((episode) => episode.availability === 'available').length,
       missingEpisodeCount: seasonEpisodes.filter((episode) => episode.availability === 'missing').length,
       canDownload: seasonEpisodes.some((episode) => episode.canDownload),
-      canDelete: seasonEpisodes.some((episode) => episode.canDelete),
+      canDelete: seasonEpisodes.length > 0 && seasonEpisodes.every((episode) => episode.canDelete),
       isDownloading: current.isDownloading || seasonEpisodes.some((episode) => episode.availability === 'downloading')
     });
   }
@@ -1408,6 +1444,28 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
       name: 'SeasonSearch',
       seriesId: payload.seriesId,
       seasonNumber: payload.seasonNumber
+    })
+  });
+}
+
+export async function requestEpisode(config: AppConfig, payload: EpisodeRequestPayload): Promise<void> {
+  if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
+    throw new Error('Sonarr is not configured.');
+  }
+
+  if (!payload.episodeId) {
+    throw new Error('Episode id is required.');
+  }
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
+    method: 'POST',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'EpisodeSearch',
+      episodeIds: [payload.episodeId]
     })
   });
 }
@@ -2391,6 +2449,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     clearTimeout(timeout);
   }
 }
+
 
 function jellyfinToCard(
   item: JellyfinItem,
