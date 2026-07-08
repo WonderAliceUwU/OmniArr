@@ -37,14 +37,19 @@ const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
 const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
 const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
 
-const sidebarItems: Array<{ route: AppRoute; label: string; short: string; icon?: 'calendar' | 'search'; iconClassName?: string }> = [
-  { route: 'home', label: 'Inicio', short: 'H' },
+type SidebarItem = { route: AppRoute; label: string; short: string; icon?: 'calendar' | 'search' | 'downloads' | 'home' | 'library'; iconClassName?: string }
+
+const topSidebarItems: SidebarItem[] = [
   { route: 'search', label: 'Search', short: 'S', icon: 'search', iconClassName: 'sidebar-search-icon' },
-  { route: 'dorama', label: 'K-Drama', short: 'K' },
-  { route: 'anime', label: 'Anime', short: 'A' },
-  { route: 'library', label: 'Library', short: 'L' },
   { route: 'calendar', label: 'Upcoming', short: 'C', icon: 'calendar' },
-  { route: 'downloads', label: 'Downloads', short: 'D' },
+  { route: 'downloads', label: 'Downloads', short: 'D', icon: 'downloads' },
+]
+
+const sidebarItems: SidebarItem[] = [
+  { route: 'home', label: 'Inicio', short: 'H', icon: 'home' },
+  { route: 'dorama', label: 'K-Drama', short: '아' },
+  { route: 'anime', label: 'Anime', short: 'あ' },
+  { route: 'library', label: 'Library', short: 'L', icon: 'library' },
 ]
 
 const networkSidebarItems: Array<{ route: AppRoute; label: string; icon: string; iconClassName?: string }> = [
@@ -560,6 +565,22 @@ function Sidebar(props: {
         </button>
 
         <div className="sidebar-links">
+          {topSidebarItems.map((item) => (
+            <button
+              className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
+              key={item.route}
+              onClick={() => startTransition(() => props.setRoute(item.route))}
+              type="button"
+            >
+              <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.short}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="sidebar-links">
           {sidebarItems.map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
@@ -568,7 +589,7 @@ function Sidebar(props: {
               type="button"
             >
               <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
-                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.short}
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.short}
               </span>
               <span>{item.label}</span>
             </button>
@@ -624,6 +645,27 @@ function SearchGlyph() {
     <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
       <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
       <path d="M10.25 10.25L13.1 13.1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function HomeGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <path d="M2.4 7.1L8 2.6L13.6 7.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M3.4 6.85V13.1H12.6V6.85" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+      <path d="M6.5 13.1V9.6H9.5V13.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function LibraryGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <rect x="2.4" y="4" width="11.2" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.5 9.9H11.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+      <circle cx="10.9" cy="7.1" r="0.7" fill="currentColor" />
+      <circle cx="8.8" cy="7.1" r="0.7" fill="currentColor" />
     </svg>
   )
 }
