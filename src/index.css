@@ -375,6 +375,16 @@ img {
   display: block;
 }
 
+.sidebar-search-icon {
+  color: #ffffff;
+}
+
+.sidebar-search-icon .sidebar-glyph-icon {
+  width: 1.02rem;
+  height: 1.02rem;
+  stroke: currentColor;
+}
+
 .sidebar-network-icon {
   overflow: hidden;
   padding: 0.2rem;
@@ -470,6 +480,7 @@ img {
 }
 
 .hub-page,
+.search-page,
 .calendar-page,
 .downloads-page,
 .settings-page {
@@ -549,8 +560,10 @@ img {
   position: relative;
   z-index: 1;
   display: grid;
-  align-items: end;
+  align-items: center;
+  align-content: center;
   gap: 1.5rem;
+  min-height: 100%;
   animation: hero-copy-in 420ms ease;
 }
 
@@ -739,6 +752,39 @@ img {
   box-shadow:
     0 1rem 2.2rem rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.media-tile.has-landscape-logo .media-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at left bottom, rgba(4, 6, 10, 0.68) 0%, rgba(4, 6, 10, 0.5) 18%, rgba(4, 6, 10, 0.18) 36%, rgba(4, 6, 10, 0) 58%);
+  pointer-events: none;
+}
+
+.media-landscape-logo-wrap {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  max-width: min(56%, 15rem);
+  pointer-events: none;
+}
+
+.continue-tile.has-progress .media-landscape-logo-wrap {
+  bottom: 1.65rem;
+}
+
+.media-landscape-logo {
+  width: auto;
+  max-width: 100%;
+  max-height: 4.1rem;
+  object-fit: contain;
+  object-position: left center;
+  filter: drop-shadow(0 0.45rem 1rem rgba(0, 0, 0, 0.58));
 }
 
 .media-hover-label {
@@ -1310,7 +1356,7 @@ img {
 
 .title-details-hero-heading {
   position: relative;
-  top: -1rem;
+  top: 0;
   max-width: 34rem;
   animation: titleHeroRise 420ms ease-out;
 }
@@ -1401,7 +1447,7 @@ img {
 
 .title-details-body .title-details-shell {
   display: grid;
-  align-content: end;
+  align-content: center;
   width: min(100%, 84rem);
   min-height: 100%;
   padding-top: 12rem;
@@ -1459,13 +1505,13 @@ img {
 .title-action-button-play {
   color: #f3f6ff;
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .title-action-button-play:hover,
 .title-action-button-play:focus-visible {
   background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .title-seasons-panel {
@@ -2336,8 +2382,93 @@ img {
 
 .calendar-groups,
 .downloads-grid,
+.search-results-section,
 .settings-page {
-  padding: 0 1.25rem 1rem;
+  padding: 0.4rem 2.35rem 0;
+}
+
+.search-page {
+  align-content: start;
+  gap: 1.6rem;
+  min-height: calc(100vh - 9rem);
+}
+
+.search-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.4rem 2.35rem 0;
+}
+
+.search-header h2,
+.downloads-header h2 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #d6d8de;
+}
+
+.search-header h2 .sidebar-glyph-icon,
+.downloads-header h2 .title-action-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.search-header p {
+  margin: 0.35rem 0 0;
+  color: #95a2ba;
+}
+
+.search-form {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: min(38rem, 100%);
+}
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.9rem;
+  padding: 0.78rem 1rem;
+  border-radius: 999px;
+}
+
+.search-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.9rem;
+  min-width: 2.9rem;
+  margin-top: 0;
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
+  border-radius: 999px;
+}
+
+.search-submit-button .sidebar-glyph-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.search-results-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.search-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(23rem, 1fr));
+  gap: 1.15rem;
+}
+
+.search-results-grid .media-tile.landscape {
+  width: 100%;
 }
 
 .calendar-page {
@@ -2501,14 +2632,7 @@ img {
 }
 
 .downloads-header {
-  padding: 0 2.35rem;
-}
-
-.downloads-header h2 {
-  margin: 0;
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #d6d8de;
+  padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 2.35rem 0;
 }
 
 .downloads-grid {
@@ -2667,12 +2791,6 @@ img {
   padding-bottom: 0.06rem;
 }
 
-
-.empty-state {
-  padding: 1.5rem;
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.04);
-}
 
 .settings-page {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3162,6 +3280,15 @@ img {
   .calendar-header {
     padding-left: 1.25rem;
     padding-right: 1.25rem;
+  }
+
+  .search-header {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  .search-form {
+    grid-template-columns: 1fr;
   }
 
   .calendar-entry-card {
