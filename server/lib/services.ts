@@ -897,9 +897,6 @@ function mapSonarrCalendarEntry(item: SonarrCalendarRecord): CalendarEntry | nul
 
   const seasonNumber = typeof item.seasonNumber === 'number' ? item.seasonNumber : undefined
   const episodeNumber = typeof item.episodeNumber === 'number' ? item.episodeNumber : undefined
-  const episodeCode = seasonNumber && episodeNumber
-    ? `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`
-    : ''
   const detail = item.title || ''
   const subtitle = [
     typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : '',

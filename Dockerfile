@@ -16,6 +16,9 @@ ENV NODE_ENV=production
 ENV PORT=8787
 ENV OMNIARR_DATA_DIR=/app/data
 
+COPY --from=build /app/package*.json ./
+RUN npm ci --omit=dev
+
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
 
