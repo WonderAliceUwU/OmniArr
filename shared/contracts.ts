@@ -9,6 +9,7 @@ export type AppRoute =
   | 'viki'
   | 'disney'
   | 'library'
+  | 'calendar'
   | 'downloads'
   | 'settings';
 
@@ -187,6 +188,23 @@ export interface DownloadItem {
   backdropUrl?: string;
   tmdbId?: number;
   mediaType?: 'movie' | 'tv' | 'series';
+}
+
+export interface CalendarEntry {
+  id: string;
+  source: 'sonarr' | 'radarr';
+  kind: 'episode' | 'movie';
+  startsAt: string;
+  title: string;
+  subtitle: string;
+  detail: string;
+  imageUrl?: string;
+  stateLabel?: string;
+  card: MediaCard;
+}
+
+export interface CalendarResponse {
+  items: CalendarEntry[];
 }
 
 export interface DashboardResponse {

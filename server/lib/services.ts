@@ -1,5 +1,7 @@
 import type {
   AppConfig,
+  CalendarEntry,
+  CalendarResponse,
   ConnectionStatus,
   DashboardResponse,
   DownloadItem,
@@ -76,6 +78,25 @@ interface SonarrCommandRecord {
   };
 }
 
+interface SonarrCalendarRecord {
+  id?: number;
+  title?: string;
+  airDate?: string;
+  airDateUtc?: string;
+  overview?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  hasFile?: boolean;
+  monitored?: boolean;
+  series?: {
+    title?: string;
+    tmdbId?: number;
+    images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
+    year?: number;
+    status?: string;
+  };
+}
+
 interface RadarrQueueRecord {
   id?: number;
   title?: string;
@@ -85,6 +106,21 @@ interface RadarrQueueRecord {
   size?: number;
   status?: string;
   timeleft?: string;
+}
+
+interface RadarrCalendarRecord {
+  id?: number;
+  tmdbId?: number;
+  title?: string;
+  year?: number;
+  overview?: string;
+  status?: string;
+  inCinemas?: string;
+  physicalRelease?: string;
+  digitalRelease?: string;
+  monitored?: boolean;
+  hasFile?: boolean;
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
 interface DownloadMetadataHint {
@@ -333,10 +369,11 @@ export async function getHubPage(
       'en'
     )
   ]);
+  const heroWithLogos = await applyTitleLogosToCards(config, heroWithHighResBackdrops || []);
 
   return {
     page,
-    hero: heroWithHighResBackdrops || [],
+    hero: heroWithLogos,
     continueWatching,
     sections: (sectionsWithHighResBackdrops || [])
       .filter((section) => section.items.some((item) => item.backdropUrl || item.posterUrl))
@@ -402,6 +439,46 @@ export async function getDownloads(config: AppConfig): Promise<DownloadItem[]> {
     baseDownloads.map((item) => enrichDownloadItem(config, item, metadataCache))
   );
   return downloads.sort((a, b) => b.progress - a.progress);
+}
+
+export async function getCalendar(config: AppConfig): Promise<CalendarResponse> {
+  const start = startOfToday()
+  const end = addDays(start, 30)
+
+  const [sonarrResult, radarrResult] = await Promise.allSettled([
+    getSonarrCalendar(config, start, end),
+    getRadarrCalendar(config, start, end)
+  ])
+
+  const sonarrItems = sonarrResult.status === 'fulfilled'
+    ? sonarrResult.value.map((item) => mapSonarrCalendarEntry(item))
+    : []
+  const radarrItems = radarrResult.status === 'fulfilled'
+    ? radarrResult.value.map((item) => mapRadarrCalendarEntry(item))
+    : []
+
+  const allItems = [...sonarrItems, ...radarrItems]
+      .filter((item): item is CalendarEntry => Boolean(item));
+
+  const backdropCache = new Map<string, Promise<string>>();
+  const cards = await applyHighResBackdropsToCards(config, allItems.map(i => i.card), shouldUseHighResBackdropForCard, backdropCache, 'en');
+
+  const itemsWithBackdrops = allItems.map(item => {
+    const correspondingCard = cards.find(c => c.id === item.card.id);
+    if (correspondingCard && correspondingCard.backdropUrl) {
+      return {
+        ...item,
+        imageUrl: correspondingCard.backdropUrl,
+        card: correspondingCard
+      }
+    }
+    return item;
+  });
+
+  return {
+    items: itemsWithBackdrops
+      .sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime())
+  }
 }
 
 export async function removeDownload(config: AppConfig, id: string): Promise<void> {
@@ -733,6 +810,106 @@ function extractRemoteImage(
 ): string | undefined {
   const poster = images?.find((image) => image.coverType === 'poster');
   return poster?.remoteUrl || poster?.url || undefined;
+}
+
+function mapSonarrCalendarEntry(item: SonarrCalendarRecord): CalendarEntry | null {
+  const startsAt = item.airDateUtc || item.airDate
+  const seriesTitle = item.series?.title || ''
+  const tmdbId = Number(item.series?.tmdbId) || undefined
+
+  if (!startsAt || !seriesTitle) {
+    return null
+  }
+
+  const seasonNumber = typeof item.seasonNumber === 'number' ? item.seasonNumber : undefined
+  const episodeNumber = typeof item.episodeNumber === 'number' ? item.episodeNumber : undefined
+  const episodeCode = seasonNumber && episodeNumber
+    ? `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`
+    : ''
+  const detail = item.title || ''
+  const subtitle = [
+    typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : '',
+    typeof episodeNumber === 'number' ? `Episode ${episodeNumber}` : '',
+  ].filter(Boolean).join(' · ')
+
+  return {
+    id: `sonarr-calendar-${item.id || `${seriesTitle}-${startsAt}`}`,
+    source: 'sonarr',
+    kind: 'episode',
+    startsAt,
+    title: seriesTitle,
+    subtitle: subtitle || 'Upcoming episode',
+    detail: detail || 'Upcoming episode',
+    imageUrl: extractRemoteImage(item.series?.images),
+    stateLabel: item.hasFile ? 'Available' : item.monitored ? 'Upcoming' : 'Unmonitored',
+    card: {
+      id: `calendar-series-${tmdbId || item.id || seriesTitle}`,
+      tmdbId,
+      title: seriesTitle,
+      subtitle: subtitle || detail || 'Series',
+      overview: item.overview || '',
+      mediaType: 'series',
+      posterUrl: extractRemoteImage(item.series?.images) || '',
+      backdropUrl: extractRemoteImage(item.series?.images) || '',
+      badge: 'Sonarr',
+      actionLabel: 'Series details',
+      releaseDate: item.airDate,
+      firstAirDate: item.airDate,
+      mediaStatus: item.series?.status,
+    }
+  }
+}
+
+function mapRadarrCalendarEntry(item: RadarrCalendarRecord): CalendarEntry | null {
+  const startsAt = item.physicalRelease || item.digitalRelease || item.inCinemas
+  if (!startsAt || !item.title) {
+    return null
+  }
+
+  const posterUrl = extractRemoteImage(item.images) || ''
+  const releaseLabel = item.physicalRelease
+    ? 'Digital release'
+    : item.inCinemas
+      ? 'In cinemas'
+      : 'Release'
+
+  return {
+    id: `radarr-calendar-${item.id || `${item.title}-${startsAt}`}`,
+    source: 'radarr',
+    kind: 'movie',
+    startsAt,
+    title: item.title,
+    subtitle: item.year ? String(item.year) : 'Movie',
+    detail: releaseLabel,
+    imageUrl: posterUrl,
+    stateLabel: item.hasFile ? 'Available' : item.monitored ? 'Upcoming' : 'Unmonitored',
+    card: {
+      id: `calendar-movie-${item.tmdbId || item.id || item.title}`,
+      tmdbId: Number(item.tmdbId) || undefined,
+      title: item.title,
+      subtitle: item.year ? String(item.year) : 'Movie',
+      overview: item.overview || '',
+      mediaType: 'movie',
+      posterUrl,
+      backdropUrl: posterUrl,
+      badge: 'Radarr',
+      actionLabel: 'Movie details',
+      releaseDate: startsAt,
+      mediaStatus: item.status,
+    }
+  }
+}
+
+function startOfToday() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + amount)
+  return next
 }
 
 async function getJellyfinItemDetails(config: AppConfig, itemId: string): Promise<JellyfinItem | null> {
@@ -2282,6 +2459,36 @@ async function getRadarrQueue(config: AppConfig): Promise<RadarrQueueRecord[]> {
   return response.records || [];
 }
 
+async function getSonarrCalendar(config: AppConfig, start: Date, end: Date): Promise<SonarrCalendarRecord[]> {
+  if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
+    return []
+  }
+
+  return fetchJson<SonarrCalendarRecord[]>(
+    `${config.sonarr.baseUrl}/api/v3/calendar?includeSeries=true&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+    {
+      headers: {
+        'X-Api-Key': config.sonarr.apiKey
+      }
+    }
+  )
+}
+
+async function getRadarrCalendar(config: AppConfig, start: Date, end: Date): Promise<RadarrCalendarRecord[]> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey) {
+    return []
+  }
+
+  return fetchJson<RadarrCalendarRecord[]>(
+    `${config.radarr.baseUrl}/api/v3/calendar?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+    {
+      headers: {
+        'X-Api-Key': config.radarr.apiKey
+      }
+    }
+  )
+}
+
 async function testJellyfin(config: AppConfig): Promise<ConnectionStatus> {
   if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
     return {
@@ -2480,7 +2687,7 @@ function jellyfinToCard(
     overview: item.Overview || '',
     mediaType: item.Type === 'Movie' ? 'movie' : item.Type === 'Episode' ? 'episode' : 'series',
     posterUrl: `/api/assets/jellyfin/${item.Id}?kind=Primary&maxWidth=480&tag=${encodeURIComponent(posterTag)}`,
-    backdropUrl: `/api/assets/jellyfin/${backdropItemId}?kind=Backdrop&maxWidth=1280&tag=${encodeURIComponent(backdropTag)}`,
+    backdropUrl: `/api/assets/jellyfin/${backdropItemId}?kind=Backdrop&maxWidth=1920&tag=${encodeURIComponent(backdropTag)}`,
     badge: item.Type || 'Jellyfin',
     progress: progress > 0 ? progress : undefined,
     secondaryValue: item.UserData?.Played ? 'Watched' : undefined,
@@ -2713,6 +2920,41 @@ async function applyHighResBackdropsToCards(
   );
 }
 
+async function applyTitleLogosToCards(
+  config: AppConfig,
+  cards: MediaCard[]
+): Promise<MediaCard[]> {
+  const logoCache = new Map<string, Promise<string>>();
+
+  return Promise.all(
+    cards.map(async (card) => {
+      if (card.logoUrl || !card.tmdbId) {
+        return card;
+      }
+
+      const mediaType = resolveTmdbLogoMediaType(card);
+      if (!mediaType) {
+        return card;
+      }
+
+      const cacheKey = `${mediaType}:${card.tmdbId}`;
+      let logoPromise = logoCache.get(cacheKey);
+      if (!logoPromise) {
+        logoPromise = getPreferredTitleLogo(config, card.tmdbId, mediaType);
+        logoCache.set(cacheKey, logoPromise);
+      }
+
+      const logoUrl = await logoPromise;
+      return logoUrl
+        ? {
+            ...card,
+            logoUrl
+          }
+        : card;
+    })
+  );
+}
+
 function shouldUseHighResBackdropForCard(card: MediaCard): boolean {
   return Boolean(
     card.tmdbId
@@ -2723,6 +2965,18 @@ function shouldUseHighResBackdropForCard(card: MediaCard): boolean {
       || card.mediaType === 'episode'
     )
   );
+}
+
+function resolveTmdbLogoMediaType(card: MediaCard): 'movie' | 'tv' | null {
+  if (card.mediaType === 'movie') {
+    return 'movie';
+  }
+
+  if (card.mediaType === 'tv' || card.mediaType === 'series' || card.mediaType === 'episode') {
+    return 'tv';
+  }
+
+  return null;
 }
 
 function tmdbImagesPath(tmdbId: number, mediaType: 'movie' | 'tv'): string {

@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { api } from './api'
 import {
+  type CalendarEntry,
   defaultConfig,
   type AppConfig,
   type AppRoute,
@@ -35,11 +36,12 @@ const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
 const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
 const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
 
-const sidebarItems: Array<{ route: AppRoute; label: string; short: string }> = [
+const sidebarItems: Array<{ route: AppRoute; label: string; short: string; icon?: 'calendar' }> = [
   { route: 'home', label: 'Inicio', short: 'H' },
   { route: 'dorama', label: 'K-Drama', short: 'K' },
   { route: 'anime', label: 'Anime', short: 'A' },
   { route: 'library', label: 'Library', short: 'L' },
+  { route: 'calendar', label: 'Upcoming', short: 'C', icon: 'calendar' },
   { route: 'downloads', label: 'Downloads', short: 'D' },
 ]
 
@@ -73,6 +75,8 @@ function App() {
   const [connections, setConnections] = useState<ConnectionStatus[]>([])
   const [hubPages, setHubPages] = useState<Partial<Record<HubPageResponse['page'], HubPageResponse>>>({})
   const [hubLoading, setHubLoading] = useState(false)
+  const [calendarItems, setCalendarItems] = useState<CalendarEntry[]>([])
+  const [calendarLoading, setCalendarLoading] = useState(false)
   const [selectedCard, setSelectedCard] = useState<SelectedCardState | null>(null)
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
   const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
@@ -129,6 +133,22 @@ function App() {
     }
   }
 
+  async function loadCalendar(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setCalendarLoading(true)
+    }
+    try {
+      const calendar = await api.getCalendar()
+      setCalendarItems(calendar.items)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load the calendar.')
+    } finally {
+      if (!options?.silent) {
+        setCalendarLoading(false)
+      }
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -170,7 +190,7 @@ function App() {
       return
     }
 
-    if (route === 'downloads' || route === 'settings') {
+    if (route === 'downloads' || route === 'settings' || route === 'calendar') {
       return
     }
 
@@ -198,13 +218,23 @@ function App() {
   }, [authState, entryStage, route])
 
   useEffect(() => {
+    if (authState !== 'app' || entryStage !== 'dashboard' || route !== 'calendar') {
+      return
+    }
+
+    void loadCalendar()
+  }, [authState, entryStage, route])
+
+  useEffect(() => {
     if (authState !== 'app' || entryStage !== 'dashboard') {
       return
     }
 
     const interval = window.setInterval(() => {
       void refreshBaseData()
-      if (route !== 'downloads' && route !== 'settings') {
+      if (route === 'calendar') {
+        void loadCalendar({ silent: true })
+      } else if (route !== 'downloads' && route !== 'settings') {
         void loadHub(route as HubPageResponse['page'], { silent: true })
       }
     }, 30000)
@@ -306,7 +336,9 @@ function App() {
       } else {
         await api.requestSeries(card.tmdbId)
       }
-      if (route !== 'downloads' && route !== 'settings') {
+      if (route === 'calendar') {
+        await loadCalendar({ silent: true })
+      } else if (route !== 'downloads' && route !== 'settings') {
         await loadHub(route as HubPageResponse['page'], { silent: true })
       }
       setNotice(`${card.title} sent to ${card.mediaType === 'movie' ? 'Radarr' : 'Sonarr'}.`)
@@ -395,7 +427,7 @@ function App() {
 
   const currentJellyfinUser =
     options.jellyfinUsers.find((option) => option.id === config.jellyfin.userId)?.label || 'Media cockpit'
-  const currentHub = route !== 'downloads' && route !== 'settings' ? hubPages[route as HubPageResponse['page']] : undefined
+  const currentHub = route !== 'downloads' && route !== 'settings' && route !== 'calendar' ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
     <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
@@ -416,6 +448,7 @@ function App() {
               {error ? <p className="error-banner">{error}</p> : null}
             </div>
 
+            {route === 'calendar' ? <CalendarPage entries={calendarItems} loading={calendarLoading} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
             {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} downloads={downloads} onDelete={handleDeleteDownload} /> : null}
             {route === 'settings' ? (
               <SettingsView
@@ -429,7 +462,7 @@ function App() {
                 updateConfig={updateConfig}
               />
             ) : null}
-            {route !== 'downloads' && route !== 'settings' ? (
+            {route !== 'downloads' && route !== 'settings' && route !== 'calendar' ? (
               <HubPageView
                 busy={busy}
                 hub={currentHub}
@@ -494,7 +527,9 @@ function Sidebar(props: {
               onClick={() => startTransition(() => props.setRoute(item.route))}
               type="button"
             >
-              <span className="sidebar-link-short" aria-hidden="true">{item.short}</span>
+              <span className="sidebar-link-short" aria-hidden="true">
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.short}
+              </span>
               <span>{item.label}</span>
             </button>
           ))}
@@ -799,11 +834,20 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
 
   useEffect(() => {
     if (!featured?.tmdbId) {
-      setActiveLogoUrl('')
+      setActiveLogoUrl(featured?.logoUrl || '')
       return
     }
 
-    const mediaType = featured.mediaType === 'movie' ? 'movie' : featured.mediaType === 'tv' || featured.mediaType === 'series' ? 'tv' : ''
+    if (featured.logoUrl) {
+      setActiveLogoUrl(featured.logoUrl)
+      return
+    }
+
+    const mediaType = featured.mediaType === 'movie'
+      ? 'movie'
+      : featured.mediaType === 'tv' || featured.mediaType === 'series' || featured.mediaType === 'episode'
+        ? 'tv'
+        : ''
     if (!mediaType) {
       setActiveLogoUrl('')
       return
@@ -855,7 +899,7 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
     return () => {
       cancelled = true
     }
-  }, [featured])
+  }, [featured, tmdbToken])
 
   if (!featured) {
     return (
@@ -1944,6 +1988,14 @@ function PlayGlyph() {
   )
 }
 
+function CalendarGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" viewBox="0 0 16 16">
+      <path d="M4.25 2.35h1.1v1.3h5.3v-1.3h1.1v1.3h1.05c.9 0 1.55.65 1.55 1.55v6.55c0 .9-.65 1.55-1.55 1.55H3.2c-.9 0-1.55-.65-1.55-1.55V5.2c0-.9.65-1.55 1.55-1.55h1.05v-1.3Zm-1.05 2.4c-.27 0-.45.18-.45.45v1.15h10.5V5.2c0-.27-.18-.45-.45-.45H3.2Zm10.05 2.7H2.75v4.3c0 .27.18.45.45.45h9.6c.27 0 .45-.18.45-.45v-4.3Z" fill="currentColor" />
+    </svg>
+  )
+}
+
 function MenuGlyph() {
   return (
     <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
@@ -2088,11 +2140,106 @@ function DownloadRow(props: {
   )
 }
 
+function CalendarPage(props: {
+  entries: CalendarEntry[]
+  loading: boolean
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
+}) {
+  if (props.loading) {
+    return <LoadingHub />
+  }
+
+  if (!props.entries.length) {
+    return (
+      <EmptyState
+        copy="Upcoming movies and shows will appear here"
+        title="Nothing upcoming"
+      />
+    )
+  }
+
+  const groups = groupCalendarEntries(props.entries)
+
+  return (
+    <div className="calendar-page">
+      <div className="calendar-header">
+        <h2>Upcoming</h2>
+      </div>
+      <div className="calendar-groups">
+        {groups.map((group) => (
+          <section className="calendar-group" key={group.key}>
+            <div className="calendar-group-header">
+              <strong>{group.label}</strong>
+            </div>
+            <div className="calendar-group-list">
+              {group.items.map((entry) => (
+                <button
+                  className="calendar-entry-card"
+                  key={entry.id}
+                  onClick={(event) => props.onOpenCard(entry.card, captureOriginRect(event.currentTarget))}
+                  type="button"
+                >
+                  <div className="calendar-entry-art">
+                    {entry.imageUrl ? <img alt={entry.title} loading="lazy" src={entry.imageUrl} /> : <div className="media-fallback">{entry.title.slice(0, 1).toUpperCase()}</div>}
+                  </div>
+                  <div className="calendar-entry-copy">
+                    <h4>{entry.title}</h4>
+                    <p className="calendar-entry-subtitle">{entry.subtitle}</p>
+                    <p className="calendar-entry-detail">{entry.detail}</p>
+                  </div>
+                  <div className="calendar-entry-time">
+                    <span>{formatCalendarTime(entry.startsAt)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function humanizeDownloadState(state: string) {
   return state
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function groupCalendarEntries(entries: CalendarEntry[]) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+  const grouped = new Map<string, { key: string; label: string; items: CalendarEntry[] }>()
+
+  for (const entry of entries) {
+    const date = new Date(entry.startsAt)
+    const key = date.toISOString().slice(0, 10)
+    const current = grouped.get(key)
+    if (current) {
+      current.items.push(entry)
+      continue
+    }
+    grouped.set(key, {
+      key,
+      label: formatter.format(date),
+      items: [entry],
+    })
+  }
+
+  return [...grouped.values()]
+}
+
+function formatCalendarTime(startsAt: string) {
+  const date = new Date(startsAt)
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
 }
 
 function SettingsView(props: {
