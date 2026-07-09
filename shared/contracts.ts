@@ -44,6 +44,10 @@ export interface TmdbConfig {
   bearerToken: string;
 }
 
+export interface TvdbConfig {
+  apiKey: string;
+}
+
 export interface AppPreferences {
   language: string;
   region: string;
@@ -57,6 +61,7 @@ export interface AppConfig {
   sonarr: SonarrConfig;
   radarr: RadarrConfig;
   tmdb: TmdbConfig;
+  tvdb: TvdbConfig;
 }
 
 export interface SelectOption {
@@ -74,7 +79,7 @@ export interface ServiceOptionsResponse {
 }
 
 export interface ConnectionStatus {
-  key: 'jellyfin' | 'sonarr' | 'radarr' | 'tmdb';
+  key: 'jellyfin' | 'sonarr' | 'radarr' | 'tmdb' | 'tvdb';
   label: string;
   ok: boolean;
   message: string;
@@ -312,5 +317,8 @@ export const defaultConfig: AppConfig = {
   },
   tmdb: {
     bearerToken: ''
+  },
+  tvdb: {
+    apiKey: ''
   }
 };

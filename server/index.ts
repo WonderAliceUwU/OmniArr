@@ -439,6 +439,10 @@ async function readConfig(encryptionKey: Buffer): Promise<AppConfig> {
     tmdb: {
       ...defaultConfig.tmdb,
       ...(stored.tmdb || {})
+    },
+    tvdb: {
+      ...defaultConfig.tvdb,
+      ...(stored.tvdb || {})
     }
   });
 }
