@@ -33,6 +33,7 @@ type EntryTransitionState = 'idle' | 'forward-enter' | 'forward-exit' | 'back-en
 const MAX_CACHED_HUB_PAGES = 3
 type ModalOriginRect = { left: number; top: number; width: number; height: number }
 type SelectedCardState = { card: MediaCard; originRect: ModalOriginRect | null }
+const CAROUSEL_SCROLL_DISTANCE_RATIO = 0.84
 const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
 const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
 const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
@@ -1147,17 +1148,77 @@ function SectionCarousel(props: {
   onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
   busy: boolean
 }) {
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const [scrollState, setScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
+
+  useEffect(() => {
+    const track = trackRef.current
+    if (!track) {
+      setScrollState({ canScrollLeft: false, canScrollRight: false })
+      return
+    }
+
+    const syncScrollState = () => {
+      const maxScrollLeft = track.scrollWidth - track.clientWidth
+      setScrollState({
+        canScrollLeft: track.scrollLeft > 8,
+        canScrollRight: maxScrollLeft - track.scrollLeft > 8,
+      })
+    }
+
+    syncScrollState()
+    track.addEventListener('scroll', syncScrollState, { passive: true })
+    window.addEventListener('resize', syncScrollState)
+
+    return () => {
+      track.removeEventListener('scroll', syncScrollState)
+      window.removeEventListener('resize', syncScrollState)
+    }
+  }, [props.section.items.length])
+
   if (!props.section.items.length) return null
+
+  function scrollTrack(direction: 'left' | 'right') {
+    const track = trackRef.current
+    if (!track) return
+
+    const distance = Math.max(track.clientWidth * CAROUSEL_SCROLL_DISTANCE_RATIO, 320)
+    track.scrollBy({
+      left: direction === 'left' ? -distance : distance,
+      behavior: 'smooth',
+    })
+  }
 
   return (
     <section className={props.section.id === 'continue' ? 'carousel-row continue-row' : 'carousel-row'}>
       <div className="carousel-title">{props.section.title}</div>
-      <div className="carousel-section">
-        <div className="carousel-track">
+      <div
+        className={[
+          'carousel-section',
+          scrollState.canScrollLeft ? 'show-left-fade has-left-nav' : '',
+          scrollState.canScrollRight ? 'show-right-fade' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        {scrollState.canScrollLeft ? (
+          <button
+            aria-label={`Scroll ${props.section.title} left`}
+            className="carousel-nav left"
+            onClick={() => scrollTrack('left')}
+            type="button"
+          />
+        ) : null}
+        <div className="carousel-track" ref={trackRef}>
           {props.section.items.map((card) => (
             <MediaTile busy={props.busy} card={card} isContinueWatching={props.section.id === 'continue'} key={card.id} onOpenCard={props.onOpenCard} onRequest={props.onRequest} styleType={props.section.style || 'landscape'} />
           ))}
         </div>
+        <button
+          aria-label={`Scroll ${props.section.title} right`}
+          className="carousel-nav right"
+          disabled={!scrollState.canScrollRight}
+          onClick={() => scrollTrack('right')}
+          type="button"
+        />
       </div>
     </section>
   )
@@ -1807,14 +1868,13 @@ function TitleDetailsModal(props: {
                       <div
                         className="title-season-strip"
                       >
-                        {hasPreviousSeason ? (
-                          <button
-                            aria-label="Previous season"
-                            className="title-season-nav"
-                            onClick={() => changeSeason(-1)}
-                            type="button"
-                          />
-                        ) : null}
+                        <button
+                          aria-label="Previous season"
+                          className="title-season-nav"
+                          disabled={!hasPreviousSeason}
+                          onClick={() => changeSeason(-1)}
+                          type="button"
+                        />
                         {details.seasons.length ? (
                           <label className="title-season-selector">
                             <span className="title-season-kicker">Season</span>
@@ -1877,7 +1937,7 @@ function TitleDetailsModal(props: {
                                 {canDeleteSeasonAction ? (
                                   <div className="title-season-divider title-season-action-divider" aria-hidden="true" />
                                 ) : null}
-                                {canDeleteSeasonAction ? (
+                              {canDeleteSeasonAction ? (
                                   <button
                                     aria-label="Delete season files"
                                     className="title-season-action title-season-action-delete"
@@ -1887,6 +1947,16 @@ function TitleDetailsModal(props: {
                                   >
                                     <TrashGlyph />
                                   </button>
+                                ) : null}
+                                {hasNextSeason ? (
+                                  <>
+                                    <button
+                                      aria-label="Next season"
+                                      className="title-season-nav next"
+                                      onClick={() => changeSeason(1)}
+                                      type="button"
+                                    />
+                                  </>
                                 ) : null}
                               </div>
                             ) : null}
@@ -1900,14 +1970,6 @@ function TitleDetailsModal(props: {
                             <PlayGlyph />
                             <span>Play</span>
                           </ActionButton>
-                        ) : null}
-                        {hasNextSeason ? (
-                          <button
-                            aria-label="Next season"
-                            className="title-season-nav next"
-                            onClick={() => changeSeason(1)}
-                            type="button"
-                          />
                         ) : null}
                       </div>
                     </div>
