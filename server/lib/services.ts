@@ -1711,7 +1711,6 @@ async function buildSeasonEpisodes(
       const hasFile = Boolean(sonarrEpisode?.hasFile || sonarrEpisode?.episodeFileId);
       const isAvailableInJellyfin = Boolean(jellyfinEpisode?.id);
       const isDownloading = downloadingEpisodes.has(episodeNumber);
-      const isProcessing = Boolean(sonarrEpisode?.id) && !isDownloading && Boolean(sonarrEpisode?.monitored) && availabilityWouldBeMissing(isReleased, isAvailableInJellyfin, hasFile);
       const availability: TitleDetailsEpisode['availability'] = !isReleased
         ? 'unaired'
         : isAvailableInJellyfin || hasFile
@@ -1721,9 +1720,7 @@ async function buildSeasonEpisodes(
             : 'missing';
       const downloadStatus: TitleDetailsEpisode['downloadStatus'] = isDownloading
         ? 'downloading'
-        : isProcessing
-          ? 'processing'
-          : 'idle';
+        : 'idle';
 
       return {
         id: jellyfinEpisode?.id || buildEpisodeId(seasonNumber, episodeNumber),
@@ -1757,14 +1754,6 @@ async function buildSeasonEpisodes(
     });
 }
 
-function availabilityWouldBeMissing(
-  isReleased: boolean,
-  isAvailableInJellyfin: boolean,
-  hasFile: boolean
-) {
-  return isReleased && !isAvailableInJellyfin && !hasFile;
-}
-
 function getEpisodeQueueProgress(entry: SonarrQueueRecord | undefined): number | undefined {
   if (!entry) {
     return undefined;
@@ -1791,13 +1780,17 @@ function buildTitleSeasons(
 
   for (const season of seasons) {
     const seasonQueue = sonarrQueue.filter((entry) => entry.episode?.seasonNumber === season.seasonNumber);
+    const releasedMissingEpisodes = allEpisodes.filter((episode) =>
+      episode.seasonId === season.id
+      && episode.availability === 'missing'
+    ).length;
     const availableEpisodeCount = sonarrEpisodes.filter(
       (episode) => episode.seasonNumber === season.seasonNumber && (episode.hasFile || episode.episodeFileId)
     ).length;
     const isDownloading = seasonQueue.length > 0;
     const isProcessing = sonarrCommands.some((command) =>
       command.body?.seasonNumber === season.seasonNumber && isActiveSeasonSearchCommand(command)
-    );
+    ) && releasedMissingEpisodes > 0;
     seasonMap.set(season.seasonNumber ?? Number.MIN_SAFE_INTEGER, {
       id: season.id,
       title: season.title,
