@@ -4,6 +4,7 @@ import {
   type MouseEvent,
   type ReactNode,
   startTransition,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -1287,7 +1288,10 @@ function TitleDetailsModal(props: {
   const [activeSeasonId, setActiveSeasonId] = useState<string | undefined>(undefined)
   const [episodeWatchBusyId, setEpisodeWatchBusyId] = useState<string | null>(null)
   const [episodeDownloadBusyId, setEpisodeDownloadBusyId] = useState<string | null>(null)
+  const [pendingEpisodeRequestIds, setPendingEpisodeRequestIds] = useState<string[]>([])
+  const [pendingSeasonRequestIds, setPendingSeasonRequestIds] = useState<string[]>([])
   const [seasonActionBusy, setSeasonActionBusy] = useState<'download' | 'delete' | null>(null)
+  const [movieRequestPending, setMovieRequestPending] = useState(false)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
   const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
@@ -1350,7 +1354,10 @@ function TitleDetailsModal(props: {
     setActiveSeasonId(undefined)
     setEpisodeWatchBusyId(null)
     setEpisodeDownloadBusyId(null)
+    setPendingEpisodeRequestIds([])
+    setPendingSeasonRequestIds([])
     setSeasonActionBusy(null)
+    setMovieRequestPending(false)
     setPlayerTarget(null)
     setIsOverviewExpanded(false)
     pendingSeasonScrollRef.current = null
@@ -1368,13 +1375,13 @@ function TitleDetailsModal(props: {
       : current)
   }
 
-  async function refreshSeasonState(targetSeasonId?: string) {
+  const refreshSeasonState = useCallback(async (targetSeasonId?: string) => {
     const refreshSeasonId = targetSeasonId || activeSeasonId || details?.selectedSeasonId
     const nextDetails = await api.getTitleDetails(props.card, refreshSeasonId)
     setDetails(nextDetails)
     setDetailsError('')
     setActiveSeasonId(refreshSeasonId || nextDetails.selectedSeasonId)
-  }
+  }, [activeSeasonId, details?.selectedSeasonId, props.card])
 
   useEffect(() => {
     let cancelled = false
@@ -1540,27 +1547,105 @@ function TitleDetailsModal(props: {
     : ''
   const playLabel = playerTarget?.title || details?.episodes.find((episode) => episode.id === playId)?.title || displayTitle
   const activeSeasonMeta = details?.seasons.find((season) => season.id === seasonValue)
+  const effectiveActiveSeasonMeta = activeSeasonMeta && pendingSeasonRequestIds.includes(activeSeasonMeta.id)
+    && activeSeasonMeta.downloadStatus === 'idle'
+      ? {
+          ...activeSeasonMeta,
+          downloadStatus: 'processing' as const,
+        }
+      : activeSeasonMeta
   const activeSeasonDetails = details && seasonValue
     ? { episodes: getSeasonEpisodes(details.episodes, seasonValue) }
     : null
-  const activeSeasonNumber = activeSeasonMeta?.seasonNumber
-  const activeSeasonDownloadStatus = activeSeasonMeta?.downloadStatus || 'idle'
+  const movieRequestStatus = movieRequestPending && (details?.requestStatus || 'idle') === 'idle'
+    ? 'processing'
+    : details?.requestStatus || 'idle'
+  const movieRequestProgress = details?.requestProgress || 0
+  const isMovieRequestActive = details?.mediaType === 'movie' && (movieRequestStatus === 'processing' || movieRequestStatus === 'downloading')
+  const activeSeasonNumber = effectiveActiveSeasonMeta?.seasonNumber
+  const activeSeasonDownloadStatus = effectiveActiveSeasonMeta?.downloadStatus || 'idle'
   const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
   const resolvedSeasonIndex = currentSeasonIndex >= 0 ? currentSeasonIndex : 0
   const hasPreviousSeason = Boolean(details?.seasons.length && resolvedSeasonIndex > 0)
   const hasNextSeason = Boolean(details?.seasons.length && resolvedSeasonIndex < details.seasons.length - 1)
   const visibleEpisodes = details
-    ? details.episodes
+    ? details.episodes.map((episode) => pendingEpisodeRequestIds.includes(episode.id)
+      && episode.downloadStatus !== 'downloading'
+      && episode.availability !== 'available'
+        ? {
+            ...episode,
+            downloadStatus: 'processing' as const,
+            canDownload: false,
+          }
+        : episode)
     : []
   const canDownloadSeasonAction = Boolean(
     activeSeasonDownloadStatus === 'processing'
     || activeSeasonDownloadStatus === 'downloading'
     || (details?.sonarrSeriesId && typeof activeSeasonNumber === 'number' && activeSeasonNumber > 0)
-    || activeSeasonMeta?.canDownload
+    || effectiveActiveSeasonMeta?.canDownload
     || (canRequest && !details?.sonarrSeriesId && typeof activeSeasonNumber === 'number')
   )
-  const canDeleteSeasonAction = Boolean(activeSeasonMeta?.canDelete)
+  const canDeleteSeasonAction = Boolean(effectiveActiveSeasonMeta?.canDelete)
   const shouldShowDownloadSeasonAction = canDownloadSeasonAction && !canDeleteSeasonAction
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series') {
+      return
+    }
+
+    setPendingEpisodeRequestIds((current) => current.filter((episodeId) => {
+      const episode = details.episodes.find((entry) => entry.id === episodeId)
+      if (!episode) {
+        return false
+      }
+
+      return episode.downloadStatus !== 'downloading' && episode.availability !== 'available'
+    }))
+  }, [details])
+
+  useEffect(() => {
+    if (!pendingEpisodeRequestIds.length) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPendingEpisodeRequestIds([])
+    }, 20000)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [pendingEpisodeRequestIds])
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'series') {
+      return
+    }
+
+    setPendingSeasonRequestIds((current) => current.filter((seasonId) => {
+      const season = details.seasons.find((entry) => entry.id === seasonId)
+      if (!season) {
+        return false
+      }
+
+      return season.downloadStatus !== 'downloading' && season.canDelete !== true
+    }))
+  }, [details])
+
+  useEffect(() => {
+    if (!pendingSeasonRequestIds.length) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPendingSeasonRequestIds([])
+    }, 25000)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [pendingSeasonRequestIds])
 
   useEffect(() => {
     if (!details || details.mediaType !== 'series') {
@@ -1578,7 +1663,7 @@ function TitleDetailsModal(props: {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [activeSeasonDownloadStatus, details, seasonValue])
+  }, [activeSeasonDownloadStatus, details, refreshSeasonState, seasonValue])
 
   useEffect(() => {
     if (!details || details.mediaType !== 'series') {
@@ -1600,7 +1685,49 @@ function TitleDetailsModal(props: {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [details, seasonValue])
+  }, [details, refreshSeasonState, seasonValue])
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'movie') {
+      return
+    }
+
+    if (movieRequestPending && (details.requestStatus === 'processing' || details.requestStatus === 'downloading')) {
+      setMovieRequestPending(false)
+    }
+  }, [details, movieRequestPending])
+
+  useEffect(() => {
+    if (!movieRequestPending) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setMovieRequestPending(false)
+    }, 15000)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [movieRequestPending])
+
+  useEffect(() => {
+    if (!details || details.mediaType !== 'movie') {
+      return
+    }
+
+    if (movieRequestStatus !== 'processing' && movieRequestStatus !== 'downloading') {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshSeasonState()
+    }, movieRequestStatus === 'processing' ? 2000 : 2500)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [details, movieRequestStatus, refreshSeasonState])
 
   function handleRequestClose() {
     if (!props.originRect || transitionState === 'closing') {
@@ -1688,6 +1815,9 @@ function TitleDetailsModal(props: {
     setSeasonActionBusy('download')
     setDetailsError('')
     try {
+      if (activeSeasonMeta?.id) {
+        setPendingSeasonRequestIds((current) => current.includes(activeSeasonMeta.id) ? current : [...current, activeSeasonMeta.id])
+      }
       if (details?.sonarrSeriesId) {
         await api.requestSeason({
           seriesId: details.sonarrSeriesId,
@@ -1698,6 +1828,9 @@ function TitleDetailsModal(props: {
       }
       await refreshSeasonState(seasonValue || undefined)
     } catch (error) {
+      if (activeSeasonMeta?.id) {
+        setPendingSeasonRequestIds((current) => current.filter((id) => id !== activeSeasonMeta.id))
+      }
       setDetailsError(error instanceof Error ? error.message : 'Failed to queue the season download.')
     } finally {
       setSeasonActionBusy(null)
@@ -1728,6 +1861,37 @@ function TitleDetailsModal(props: {
     }
   }
 
+  async function handleMovieRequest() {
+    if (details?.mediaType !== 'movie' || movieRequestStatus === 'processing' || movieRequestStatus === 'downloading') {
+      return
+    }
+
+    setDetailsError('')
+    setMovieRequestPending(true)
+    setDetails((current) => current && current.mediaType === 'movie'
+      ? {
+          ...current,
+          requestStatus: 'processing',
+          requestProgress: undefined,
+        }
+      : current)
+
+    try {
+      await props.onRequest(props.card)
+      await refreshSeasonState()
+    } catch (error) {
+      setMovieRequestPending(false)
+      setDetails((current) => current && current.mediaType === 'movie'
+        ? {
+            ...current,
+            requestStatus: 'idle',
+            requestProgress: undefined,
+          }
+        : current)
+      setDetailsError(error instanceof Error ? error.message : 'Failed to queue the movie download.')
+    }
+  }
+
   function handleEpisodeDownload(
     event: MouseEvent<HTMLButtonElement>,
     episodeId: string,
@@ -1742,6 +1906,7 @@ function TitleDetailsModal(props: {
     }
 
     setEpisodeDownloadBusyId(episodeId)
+    setPendingEpisodeRequestIds((current) => current.includes(episodeId) ? current : [...current, episodeId])
     updateEpisodeInCaches(episodeId, (episode) => ({
       ...episode,
       downloadStatus: 'processing',
@@ -1751,6 +1916,7 @@ function TitleDetailsModal(props: {
 
     void api.requestEpisode({ episodeId: sonarrEpisodeId })
       .catch(() => {
+        setPendingEpisodeRequestIds((current) => current.filter((id) => id !== episodeId))
         updateEpisodeInCaches(episodeId, (episode) => ({
           ...episode,
           availability,
@@ -1852,10 +2018,36 @@ function TitleDetailsModal(props: {
                           <span>Play</span>
                         </ActionButton>
                       ) : canRequest && details?.mediaType !== 'series' ? (
-                        <button className="secondary-button title-action-button" onClick={() => void props.onRequest(props.card)} type="button">
-                          <DownloadGlyph />
-                          <span>Request</span>
-                        </button>
+                        isMovieRequestActive ? (
+                          movieRequestStatus === 'downloading' ? (
+                            <div
+                              aria-label="Movie downloading"
+                              className="title-movie-request-progress"
+                              role="img"
+                              title={`${movieRequestProgress}% downloaded`}
+                            >
+                              <span
+                                className="title-movie-request-progress-ring"
+                                style={{ '--movie-download-progress': `${movieRequestProgress}` } as React.CSSProperties}
+                              />
+                              <span className="title-movie-request-progress-percent">{`${movieRequestProgress}%`}</span>
+                            </div>
+                          ) : (
+                            <div
+                              aria-label="Movie processing"
+                              className="title-movie-request-processing"
+                              role="img"
+                              title="Processing"
+                            >
+                              <span className="title-movie-request-spinner" aria-hidden="true" />
+                            </div>
+                          )
+                        ) : (
+                          <button className="secondary-button title-action-button" onClick={() => void handleMovieRequest()} type="button">
+                            <DownloadGlyph />
+                            <span>Request</span>
+                          </button>
+                        )
                       ) : null}
                     </div>
                   </div>
