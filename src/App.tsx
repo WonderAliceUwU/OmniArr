@@ -2530,6 +2530,13 @@ function SettingsView(props: {
         </label>
       </SettingsCard>
 
+      <SettingsCard title="TVDB">
+        <label>
+          API key
+          <input className="input" onChange={(event) => props.updateConfig('tvdb', { apiKey: event.target.value })} placeholder="Optional if already provided via TVDB_API_KEY" value={props.config.tvdb.apiKey} />
+        </label>
+      </SettingsCard>
+
       <div className="actions-row">
         <button className="primary-button" disabled={props.busy} type="submit">
           {props.busy ? 'Saving…' : 'Save settings'}
