@@ -165,6 +165,7 @@ export interface TitleDetailsResponse {
   tmdbId?: number;
   providerId?: string;
   sonarrSeriesId?: number;
+  radarrMovieId?: number;
   playTargetId?: string;
   availableInJellyfin: boolean;
   title: string;
@@ -174,6 +175,8 @@ export interface TitleDetailsResponse {
   posterUrl: string;
   backdropUrl: string;
   logoUrl?: string;
+  requestStatus?: 'idle' | 'processing' | 'downloading';
+  requestProgress?: number;
   selectedSeasonId?: string;
   seasons: TitleDetailsSeason[];
   episodes: TitleDetailsEpisode[];

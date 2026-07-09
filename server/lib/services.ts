@@ -75,6 +75,7 @@ interface SonarrCommandRecord {
   body?: {
     seriesId?: number;
     seasonNumber?: number;
+    episodeIds?: number[];
   };
 }
 
@@ -100,12 +101,33 @@ interface SonarrCalendarRecord {
 interface RadarrQueueRecord {
   id?: number;
   title?: string;
-  movie?: { title?: string; tmdbId?: number; year?: number; images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }> };
+  movie?: { id?: number; title?: string; tmdbId?: number; year?: number; images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }> };
   trackedDownloadState?: string;
   sizeleft?: number;
   size?: number;
   status?: string;
   timeleft?: string;
+}
+
+interface RadarrCommandRecord {
+  id?: number;
+  name?: string;
+  commandName?: string;
+  status?: string;
+  state?: string;
+  body?: {
+    movieIds?: number[];
+  };
+}
+
+interface RadarrMovieRecord {
+  id?: number;
+  tmdbId?: number;
+  title?: string;
+  year?: number;
+  hasFile?: boolean;
+  monitored?: boolean;
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
 interface RadarrCalendarRecord {
@@ -173,6 +195,19 @@ interface SonarrSeriesRecord {
   title?: string;
   tmdbId?: number;
   tvdbId?: number;
+  seasons?: Array<{
+    seasonNumber?: number;
+    monitored?: boolean;
+  }>;
+  qualityProfileId?: number;
+  languageProfileId?: number;
+  rootFolderPath?: string;
+  seasonFolder?: boolean;
+  monitored?: boolean;
+  seriesType?: string;
+  titleSlug?: string;
+  path?: string;
+  addOptions?: Record<string, unknown>;
 }
 
 interface SonarrEpisodeRecord {
@@ -651,11 +686,29 @@ export async function getTitleDetails(
   const effectiveBackdropUrl = backdropUrl || resolveBackdrop(seriesItem || item, card);
 
   if (!isSeries) {
+    const [radarrMovie, radarrQueue, radarrCommands] = tmdbId
+      ? await Promise.all([
+          getRadarrMovieRecord(config, tmdbId),
+          getRadarrQueue(config),
+          getRadarrCommands(config)
+        ])
+      : [null, [], []];
+    const radarrQueueEntry = radarrMovie?.id
+      ? radarrQueue.find((entry) => entry.movie?.id === radarrMovie.id || entry.movie?.tmdbId === tmdbId)
+      : radarrQueue.find((entry) => entry.movie?.tmdbId === tmdbId);
+    const isDownloadingInRadarr = Boolean(radarrQueueEntry);
+    const radarrMovieId = radarrMovie?.id;
+    const isProcessingInRadarr = Boolean(
+      !isDownloadingInRadarr
+      && radarrMovieId
+      && radarrCommands.some((command) => isActiveMovieSearchCommand(command, radarrMovieId))
+    );
     const movieDetails = tmdbId ? await getTmdbMovieSummary(config, tmdbId) : null;
     return {
       id: card.id,
       tmdbId,
       providerId: item?.Id || card.providerId,
+      radarrMovieId,
       playTargetId: item?.Id || card.providerId,
       availableInJellyfin: Boolean(item?.Id || card.providerId),
       title: fallbackTitle,
@@ -665,6 +718,8 @@ export async function getTitleDetails(
       posterUrl,
       backdropUrl: effectiveBackdropUrl,
       logoUrl: logoUrl || card.logoUrl,
+      requestStatus: isDownloadingInRadarr ? 'downloading' : isProcessingInRadarr ? 'processing' : 'idle',
+      requestProgress: isDownloadingInRadarr ? getMovieQueueProgress(radarrQueueEntry) : undefined,
       seasons: [],
       episodes: [],
       cast: buildTitleCast(movieDetails, 'movie')
@@ -711,6 +766,7 @@ export async function getTitleDetails(
       Boolean(sonarrSeries?.id),
       sonarrContext.episodes,
       sonarrContext.queue,
+      sonarrContext.commands,
       hasUsableTvdbEpisodes ? tvdbEpisodes : []
     ))
   );
@@ -1429,6 +1485,21 @@ async function getSonarrSeriesRecord(
   return response.find((series) => series.id && (!tmdbId || !series.tmdbId || series.tmdbId === tmdbId)) || response[0] || null;
 }
 
+async function getSonarrSeriesById(config: AppConfig, seriesId: number): Promise<SonarrSeriesRecord | null> {
+  if (!config.sonarr.baseUrl || !config.sonarr.apiKey || !seriesId) {
+    return null;
+  }
+
+  return fetchJson<SonarrSeriesRecord>(
+    `${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(seriesId))}`,
+    {
+      headers: {
+        'X-Api-Key': config.sonarr.apiKey
+      }
+    }
+  );
+}
+
 async function getSonarrEpisodesBySeriesId(config: AppConfig, seriesId: number): Promise<SonarrEpisodeRecord[]> {
   return fetchJson<SonarrEpisodeRecord[]>(
     `${config.sonarr.baseUrl}/api/v3/episode?seriesId=${encodeURIComponent(String(seriesId))}`,
@@ -1460,11 +1531,23 @@ async function getSonarrSeriesContext(
     getSonarrQueue(config),
     getSonarrCommands(config)
   ]);
+  const seriesEpisodeIds = new Set(
+    episodes
+      .map((episode) => episode.id)
+      .filter((id): id is number => typeof id === 'number')
+  );
 
   return {
     episodes,
     queue: queue.filter((entry) => entry.seriesId === seriesId),
-    commands: commands.filter((command) => command.body?.seriesId === seriesId)
+    commands: commands.filter((command) => {
+      if (command.body?.seriesId === seriesId) {
+        return true;
+      }
+
+      const episodeIds = Array.isArray(command.body?.episodeIds) ? command.body.episodeIds : [];
+      return episodeIds.some((episodeId) => seriesEpisodeIds.has(episodeId));
+    })
   };
 }
 
@@ -1485,6 +1568,112 @@ async function getSonarrCommands(config: AppConfig): Promise<SonarrCommandRecord
   } catch {
     return [];
   }
+}
+
+async function getRadarrCommands(config: AppConfig): Promise<RadarrCommandRecord[]> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey) {
+    return [];
+  }
+
+  try {
+    return await fetchJson<RadarrCommandRecord[]>(
+      `${config.radarr.baseUrl}/api/v3/command`,
+      {
+        headers: {
+          'X-Api-Key': config.radarr.apiKey
+        }
+      }
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function getRadarrMovieRecord(config: AppConfig, tmdbId: number): Promise<RadarrMovieRecord | null> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey || !tmdbId) {
+    return null;
+  }
+
+  const requestInit = {
+    headers: {
+      'X-Api-Key': config.radarr.apiKey
+    }
+  };
+
+  try {
+    const response = await fetchJson<unknown>(
+      `${config.radarr.baseUrl}/api/v3/movie?tmdbId=${encodeURIComponent(String(tmdbId))}`,
+      requestInit
+    );
+    const directMatches = asArray(response) as RadarrMovieRecord[];
+    const directMovie = directMatches.find((movie) => Number(movie.tmdbId || 0) === tmdbId);
+    if (directMovie) {
+      return directMovie;
+    }
+
+    const singleMovie = asRecord(response) as RadarrMovieRecord;
+    if (Number(singleMovie.tmdbId || 0) === tmdbId) {
+      return singleMovie;
+    }
+  } catch {
+    // Older Radarr versions may not support filtering by tmdbId.
+  }
+
+  try {
+    const response = await fetchJson<RadarrMovieRecord[]>(
+      `${config.radarr.baseUrl}/api/v3/movie`,
+      requestInit
+    );
+    return response.find((movie) => Number(movie.tmdbId || 0) === tmdbId) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSonarrRequestConfig(config: AppConfig): Promise<{
+  rootFolderPath: string;
+  qualityProfileId: number;
+  languageProfileId: number;
+}> {
+  const rootFolderPath = config.sonarr.rootFolderPath || (await getSonarrRootFolders(config))[0]?.id || '';
+  const qualityProfileId = config.sonarr.qualityProfileId || Number((await getSonarrQualityProfiles(config))[0]?.id || 0);
+  const languageProfileId = config.sonarr.languageProfileId || Number((await getSonarrLanguageProfiles(config))[0]?.id || 0);
+
+  if (!rootFolderPath) {
+    throw new Error('Sonarr root folder is not configured.');
+  }
+  if (!qualityProfileId) {
+    throw new Error('Sonarr quality profile is not configured.');
+  }
+  if (!languageProfileId) {
+    throw new Error('Sonarr language profile is not configured.');
+  }
+
+  return {
+    rootFolderPath,
+    qualityProfileId,
+    languageProfileId
+  };
+}
+
+async function resolveRadarrRequestConfig(config: AppConfig): Promise<{
+  rootFolderPath: string;
+  qualityProfileId: number;
+}> {
+  const rootFolderPath = config.radarr.rootFolderPath || (await getRadarrRootFolders(config))[0]?.id || '';
+  const qualityProfileId = config.radarr.qualityProfileId || Number((await getRadarrQualityProfiles(config))[0]?.id || 0);
+
+  if (!rootFolderPath) {
+    throw new Error('Radarr root folder is not configured.');
+  }
+  if (!qualityProfileId) {
+    throw new Error('Radarr quality profile is not configured.');
+  }
+
+  return {
+    rootFolderPath,
+    qualityProfileId
+  };
 }
 
 function buildSeriesSeasonDescriptors(
@@ -1643,6 +1832,7 @@ async function buildSeasonEpisodes(
   isManagedInSonarr: boolean,
   sonarrEpisodes: SonarrEpisodeRecord[],
   sonarrQueue: SonarrQueueRecord[],
+  sonarrCommands: SonarrCommandRecord[],
   tvdbEpisodes: TvdbEpisodeRecord[]
 ): Promise<TitleDetailsEpisode[]> {
   const seasonNumber = season.seasonNumber;
@@ -1711,6 +1901,12 @@ async function buildSeasonEpisodes(
       const hasFile = Boolean(sonarrEpisode?.hasFile || sonarrEpisode?.episodeFileId);
       const isAvailableInJellyfin = Boolean(jellyfinEpisode?.id);
       const isDownloading = downloadingEpisodes.has(episodeNumber);
+      const sonarrEpisodeId = sonarrEpisode?.id;
+      const isProcessing = Boolean(
+        !isDownloading
+        && sonarrEpisodeId
+        && sonarrCommands.some((command) => isActiveEpisodeSearchCommand(command, sonarrEpisodeId))
+      );
       const availability: TitleDetailsEpisode['availability'] = !isReleased
         ? 'unaired'
         : isAvailableInJellyfin || hasFile
@@ -1720,11 +1916,13 @@ async function buildSeasonEpisodes(
             : 'missing';
       const downloadStatus: TitleDetailsEpisode['downloadStatus'] = isDownloading
         ? 'downloading'
-        : 'idle';
+        : isProcessing
+          ? 'processing'
+          : 'idle';
 
       return {
         id: jellyfinEpisode?.id || buildEpisodeId(seasonNumber, episodeNumber),
-        sonarrEpisodeId: sonarrEpisode?.id,
+        sonarrEpisodeId,
         seasonId: season.id,
         title: tvdbEpisode?.name || sonarrEpisode?.title || jellyfinEpisode?.title || tmdbEpisode?.name || `Episode ${episodeNumber}`,
         overview: tvdbEpisode?.overview || sonarrEpisode?.overview || jellyfinEpisode?.overview || tmdbEpisode?.overview || '',
@@ -1780,17 +1978,13 @@ function buildTitleSeasons(
 
   for (const season of seasons) {
     const seasonQueue = sonarrQueue.filter((entry) => entry.episode?.seasonNumber === season.seasonNumber);
-    const releasedMissingEpisodes = allEpisodes.filter((episode) =>
-      episode.seasonId === season.id
-      && episode.availability === 'missing'
-    ).length;
     const availableEpisodeCount = sonarrEpisodes.filter(
       (episode) => episode.seasonNumber === season.seasonNumber && (episode.hasFile || episode.episodeFileId)
     ).length;
     const isDownloading = seasonQueue.length > 0;
     const isProcessing = sonarrCommands.some((command) =>
       command.body?.seasonNumber === season.seasonNumber && isActiveSeasonSearchCommand(command)
-    ) && releasedMissingEpisodes > 0;
+    );
     seasonMap.set(season.seasonNumber ?? Number.MIN_SAFE_INTEGER, {
       id: season.id,
       title: season.title,
@@ -1865,6 +2059,32 @@ function isActiveSeasonSearchCommand(command: SonarrCommandRecord): boolean {
     && status !== 'orphaned';
 }
 
+function isActiveEpisodeSearchCommand(command: SonarrCommandRecord, episodeId: number): boolean {
+  const name = String(command.name || command.commandName || '').toLowerCase();
+  const status = String(command.status || command.state || '').toLowerCase();
+  const episodeIds = Array.isArray(command.body?.episodeIds) ? command.body.episodeIds : [];
+  return name === 'episodesearch'
+    && episodeIds.includes(episodeId)
+    && status !== 'completed'
+    && status !== 'failed'
+    && status !== 'aborted'
+    && status !== 'cancelled'
+    && status !== 'orphaned';
+}
+
+function isActiveMovieSearchCommand(command: RadarrCommandRecord, movieId: number): boolean {
+  const name = String(command.name || command.commandName || '').toLowerCase();
+  const status = String(command.status || command.state || '').toLowerCase();
+  const movieIds = Array.isArray(command.body?.movieIds) ? command.body.movieIds : [];
+  return name === 'moviessearch'
+    && movieIds.includes(movieId)
+    && status !== 'completed'
+    && status !== 'failed'
+    && status !== 'aborted'
+    && status !== 'cancelled'
+    && status !== 'orphaned';
+}
+
 function getSeasonQueueProgress(queue: SonarrQueueRecord[]): number | undefined {
   if (!queue.length) {
     return undefined;
@@ -1878,6 +2098,21 @@ function getSeasonQueueProgress(queue: SonarrQueueRecord[]): number | undefined 
   }
 
   return Math.max(0, Math.min(100, Math.round(((totalSize - totalSizeLeft) / totalSize) * 100)));
+}
+
+function getMovieQueueProgress(entry: RadarrQueueRecord | undefined): number | undefined {
+  if (!entry) {
+    return undefined;
+  }
+
+  const total = Number(entry.size || 0);
+  const left = Number(entry.sizeleft || 0);
+  if (!total || total <= 0) {
+    return undefined;
+  }
+
+  const percent = Math.round(((total - left) / total) * 100);
+  return Math.max(0, Math.min(100, percent));
 }
 
 async function getNextEpisodeToPlay(
@@ -1954,33 +2189,76 @@ function mapJellyfinEpisode(episode: JellyfinItem): TitleDetailsEpisode {
 }
 
 export async function requestMovie(config: AppConfig, tmdbId: number): Promise<void> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey) {
+    throw new Error('Radarr is not configured.');
+  }
+  if (!tmdbId) {
+    throw new Error('Movie TMDb id is required.');
+  }
+  const radarrRequestConfig = await resolveRadarrRequestConfig(config);
+
   const details = await tmdbFetch(config, `/movie/${tmdbId}?language=${encodeURIComponent(config.preferences.language)}`);
   if (!details) {
     throw new Error('Failed to load the movie from TMDb.');
   }
 
-  await fetchJson(`${config.radarr.baseUrl}/api/v3/movie`, {
-    method: 'POST',
-    headers: {
-      'X-Api-Key': config.radarr.apiKey,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      title: details.title || details.original_title || 'Movie',
-      qualityProfileId: config.radarr.qualityProfileId,
-      rootFolderPath: config.radarr.rootFolderPath,
-      tmdbId: details.id,
-      year: Number(String(details.release_date || '').slice(0, 4)) || 0,
-      minimumAvailability: 'released',
-      addOptions: {
-        monitored: config.radarr.monitor !== 'none',
-        searchForMovie: config.radarr.startSearch
-      }
-    })
-  });
+  try {
+    await fetchJson(`${config.radarr.baseUrl}/api/v3/movie`, {
+      method: 'POST',
+      headers: {
+        'X-Api-Key': config.radarr.apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: details.title || details.original_title || 'Movie',
+        qualityProfileId: radarrRequestConfig.qualityProfileId,
+        rootFolderPath: radarrRequestConfig.rootFolderPath,
+        tmdbId: details.id,
+        year: Number(String(details.release_date || '').slice(0, 4)) || 0,
+        minimumAvailability: 'released',
+        addOptions: {
+          monitored: config.radarr.monitor !== 'none',
+          searchForMovie: true
+        }
+      })
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    const looksLikeAlreadyExists = message.includes('already') || message.includes('exists') || message.includes('duplicate');
+
+    if (!looksLikeAlreadyExists) {
+      throw error;
+    }
+
+    const existingMovie = await getRadarrMovieRecord(config, tmdbId);
+    if (!existingMovie?.id) {
+      throw error;
+    }
+
+    if (existingMovie.hasFile) {
+      return;
+    }
+
+    await fetchJson(`${config.radarr.baseUrl}/api/v3/command`, {
+      method: 'POST',
+      headers: {
+        'X-Api-Key': config.radarr.apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: 'MoviesSearch',
+        movieIds: [existingMovie.id],
+        qualityProfileId: radarrRequestConfig.qualityProfileId
+      })
+    });
+  }
 }
 
 export async function requestSeries(config: AppConfig, tmdbId: number): Promise<void> {
+  if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
+    throw new Error('Sonarr is not configured.');
+  }
+
   const details = await tmdbFetch(
     config,
     `/tv/${tmdbId}?append_to_response=external_ids&language=${encodeURIComponent(config.preferences.language)}`
@@ -1993,6 +2271,7 @@ export async function requestSeries(config: AppConfig, tmdbId: number): Promise<
   if (!tvdbId) {
     throw new Error('This series does not have a TVDB ID for Sonarr.');
   }
+  const sonarrRequestConfig = await resolveSonarrRequestConfig(config);
 
   await fetchJson(`${config.sonarr.baseUrl}/api/v3/series`, {
     method: 'POST',
@@ -2003,15 +2282,15 @@ export async function requestSeries(config: AppConfig, tmdbId: number): Promise<
     body: JSON.stringify({
       title: details.name || details.original_name || 'Series',
       tvdbId,
-      qualityProfileId: config.sonarr.qualityProfileId,
-      languageProfileId: config.sonarr.languageProfileId,
-      rootFolderPath: config.sonarr.rootFolderPath,
+      qualityProfileId: sonarrRequestConfig.qualityProfileId,
+      languageProfileId: sonarrRequestConfig.languageProfileId,
+      rootFolderPath: sonarrRequestConfig.rootFolderPath,
       seasonFolder: true,
       monitored: config.sonarr.monitor !== 'none',
       addOptions: {
         monitor: config.sonarr.monitor,
-        searchForMissingEpisodes: config.sonarr.startSearch,
-        searchForCutoffUnmetEpisodes: config.sonarr.startSearch
+        searchForMissingEpisodes: true,
+        searchForCutoffUnmetEpisodes: true
       }
     })
   });
@@ -2025,6 +2304,33 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
   if (!payload.seriesId || !payload.seasonNumber) {
     throw new Error('Series id and season number are required.');
   }
+
+  const series = await getSonarrSeriesById(config, payload.seriesId);
+  if (!series?.id) {
+    throw new Error('Series not found in Sonarr.');
+  }
+
+  const nextSeasons = (series.seasons || []).map((season) =>
+    season.seasonNumber === payload.seasonNumber
+      ? { ...season, monitored: true }
+      : season
+  );
+
+  if (!nextSeasons.some((season) => season.seasonNumber === payload.seasonNumber && season.monitored)) {
+    throw new Error(`Season ${payload.seasonNumber} not found in Sonarr.`);
+  }
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(payload.seriesId))}`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      ...series,
+      seasons: nextSeasons
+    })
+  });
 
   await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
     method: 'POST',
@@ -3101,7 +3407,21 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
+      const responseText = await response.text().catch(() => '');
+      let detail = responseText.trim();
+
+      if (detail) {
+        try {
+          const parsed = JSON.parse(detail) as { message?: string; error?: string };
+          detail = String(parsed.message || parsed.error || detail);
+        } catch {
+          // Keep plain-text response bodies as-is.
+        }
+      }
+
+      throw new Error(detail
+        ? `${response.status} ${response.statusText}: ${detail}`
+        : `${response.status} ${response.statusText}`);
     }
 
     if (response.status === 204) {

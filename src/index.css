@@ -723,7 +723,7 @@ img {
   gap: 1rem;
   overflow-x: auto;
   overflow-y: visible;
-  padding: 0.45rem 4.1rem 0.85rem 1.25rem;
+  padding: 0 1rem;
   scrollbar-width: none;
 }
 
@@ -1643,6 +1643,51 @@ img {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+.title-movie-request-processing,
+.title-movie-request-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+}
+
+.title-movie-request-processing {
+  min-width: 2.5rem;
+}
+
+.title-movie-request-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  animation: episodeDockSpinner 720ms linear infinite;
+}
+
+.title-movie-request-progress {
+  gap: 0.48rem;
+  min-width: 4.1rem;
+  color: #eef4ff;
+}
+
+.title-movie-request-progress-ring {
+  --movie-download-progress: 0;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, #090b10 48%, transparent 50%),
+    conic-gradient(#ffffff calc(var(--movie-download-progress) * 1%), rgba(255, 255, 255, 0.14) 0);
+}
+
+.title-movie-request-progress-percent {
+  color: #eef4ff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .title-action-icon {
