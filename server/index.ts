@@ -234,7 +234,35 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/calendar' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
-    sendJson(response, 200, await getCalendar(config));
+    const startParam = url.searchParams.get('start');
+    const endParam = url.searchParams.get('end');
+
+    let start = new Date();
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+
+    let end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    end.setDate(0);
+    end.setHours(23, 59, 59, 999);
+
+    if (startParam) {
+        try {
+            start = new Date(startParam);
+        } catch (e) {
+            // ignore invalid date
+        }
+    }
+
+    if (endParam) {
+        try {
+            end = new Date(endParam);
+        } catch (e) {
+            // ignore invalid date
+        }
+    }
+
+    sendJson(response, 200, await getCalendar(config, start, end));
     return;
   }
 
