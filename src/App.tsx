@@ -1586,8 +1586,12 @@ function TitleDetailsModal(props: {
     || effectiveActiveSeasonMeta?.canDownload
     || (canRequest && !details?.sonarrSeriesId && typeof activeSeasonNumber === 'number')
   )
-  const canDeleteSeasonAction = Boolean(effectiveActiveSeasonMeta?.canDelete)
-  const shouldShowDownloadSeasonAction = canDownloadSeasonAction && !canDeleteSeasonAction
+  const episodesForSeason = visibleEpisodes.filter(episode => episode.seasonId === seasonValue);
+  const isSeasonFullyDownloadedExceptUnaired = episodesForSeason.length > 0 && episodesForSeason.every(
+    (episode) => episode.availability === 'available' || episode.availability === 'unaired'
+  );
+  const canDeleteSeasonAction = (Boolean(effectiveActiveSeasonMeta?.canDelete) || isSeasonFullyDownloadedExceptUnaired);
+  const shouldShowDownloadSeasonAction = canDownloadSeasonAction && !canDeleteSeasonAction;
 
   useEffect(() => {
     if (!details || details.mediaType !== 'series') {
@@ -2296,7 +2300,11 @@ function TitleDetailsModal(props: {
                                   ) : null}
                                 </div>
                               </div>
-                              <span>{formatEpisodeMeta(episode.subtitle)}</span>
+                              <span>
+                                {episode.availability === 'unaired' && episode.airDate
+                                  ? `${formatEpisodeMeta(episode.subtitle)} - Airs ${new Date(episode.airDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+                                  : formatEpisodeMeta(episode.subtitle)}
+                              </span>
                             </div>
                           </div>
                         ))}

@@ -2195,63 +2195,73 @@ export async function requestMovie(config: AppConfig, tmdbId: number): Promise<v
   if (!tmdbId) {
     throw new Error('Movie TMDb id is required.');
   }
-  const radarrRequestConfig = await resolveRadarrRequestConfig(config);
 
-  const details = await tmdbFetch(config, `/movie/${tmdbId}?language=${encodeURIComponent(config.preferences.language)}`);
-  if (!details) {
-    throw new Error('Failed to load the movie from TMDb.');
+  // First, check if the movie already exists in Radarr
+  let movie = await getRadarrMovieRecord(config, tmdbId);
+
+  // If the movie does not exist, add it to Radarr
+  if (!movie) {
+    const radarrRequestConfig = await resolveRadarrRequestConfig(config);
+    const details = await tmdbFetch(config, `/movie/${tmdbId}?language=${encodeURIComponent(config.preferences.language)}`);
+    if (!details) {
+      throw new Error('Failed to load the movie from TMDb.');
+    }
+
+    try {
+      movie = await fetchJson<RadarrMovieRecord>(`${config.radarr.baseUrl}/api/v3/movie`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': config.radarr.apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: details.title || details.original_title || 'Movie',
+          qualityProfileId: radarrRequestConfig.qualityProfileId,
+          rootFolderPath: radarrRequestConfig.rootFolderPath,
+          tmdbId: details.id,
+          year: Number(String(details.release_date || '').slice(0, 4)) || 0,
+          minimumAvailability: 'released',
+          addOptions: {
+            monitored: config.radarr.monitor !== 'none',
+            searchForMovie: false
+          }
+        })
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      const looksLikeAlreadyExists = message.includes('already') || message.includes('exists') || message.includes('duplicate');
+
+      if (looksLikeAlreadyExists) {
+        // Race condition: movie was added between our check and our add call. Get it again.
+        movie = await getRadarrMovieRecord(config, tmdbId);
+      } else {
+        throw error; // Rethrow other errors
+      }
+    }
   }
 
-  try {
-    await fetchJson(`${config.radarr.baseUrl}/api/v3/movie`, {
-      method: 'POST',
-      headers: {
-        'X-Api-Key': config.radarr.apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        title: details.title || details.original_title || 'Movie',
-        qualityProfileId: radarrRequestConfig.qualityProfileId,
-        rootFolderPath: radarrRequestConfig.rootFolderPath,
-        tmdbId: details.id,
-        year: Number(String(details.release_date || '').slice(0, 4)) || 0,
-        minimumAvailability: 'released',
-        addOptions: {
-          monitored: config.radarr.monitor !== 'none',
-          searchForMovie: true
-        }
-      })
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    const looksLikeAlreadyExists = message.includes('already') || message.includes('exists') || message.includes('duplicate');
-
-    if (!looksLikeAlreadyExists) {
-      throw error;
-    }
-
-    const existingMovie = await getRadarrMovieRecord(config, tmdbId);
-    if (!existingMovie?.id) {
-      throw error;
-    }
-
-    if (existingMovie.hasFile) {
-      return;
-    }
-
-    await fetchJson(`${config.radarr.baseUrl}/api/v3/command`, {
-      method: 'POST',
-      headers: {
-        'X-Api-Key': config.radarr.apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: 'MoviesSearch',
-        movieIds: [existingMovie.id],
-        qualityProfileId: radarrRequestConfig.qualityProfileId
-      })
-    });
+  // If we still don't have a movie record, something is wrong.
+  if (!movie?.id) {
+    throw new Error('Failed to add or find movie in Radarr.');
   }
+
+  // If movie is already downloaded, we're done.
+  if (movie.hasFile) {
+    return;
+  }
+
+  // If movie is not downloaded, trigger a search.
+  await fetchJson(`${config.radarr.baseUrl}/api/v3/command`, {
+    method: 'POST',
+    headers: {
+      'X-Api-Key': config.radarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'MoviesSearch',
+      movieIds: [movie.id]
+    })
+  });
 }
 
 export async function requestSeries(config: AppConfig, tmdbId: number): Promise<void> {
