@@ -84,8 +84,7 @@ function App() {
   const [connections, setConnections] = useState<ConnectionStatus[]>([])
   const [hubPages, setHubPages] = useState<Partial<Record<HubPageResponse['page'], HubPageResponse>>>({})
   const [hubLoading, setHubLoading] = useState(false)
-  const [calendarItems, setCalendarItems] = useState<CalendarEntry[]>([])
-  const [calendarLoading, setCalendarLoading] = useState(false)
+
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResponse['items']>([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -146,21 +145,7 @@ function App() {
     }
   }
 
-  async function loadCalendar(options?: { silent?: boolean }) {
-    if (!options?.silent) {
-      setCalendarLoading(true)
-    }
-    try {
-      const calendar = await api.getCalendar()
-      setCalendarItems(calendar.items)
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load the calendar.')
-    } finally {
-      if (!options?.silent) {
-        setCalendarLoading(false)
-      }
-    }
-  }
+
 
   useEffect(() => {
     let cancelled = false
@@ -230,13 +215,7 @@ function App() {
     }
   }, [authState, entryStage, route])
 
-  useEffect(() => {
-    if (authState !== 'app' || entryStage !== 'dashboard' || route !== 'calendar') {
-      return
-    }
 
-    void loadCalendar()
-  }, [authState, entryStage, route])
 
   useEffect(() => {
     if (authState !== 'app' || entryStage !== 'dashboard') {
@@ -245,9 +224,7 @@ function App() {
 
     const interval = window.setInterval(() => {
       void refreshBaseData()
-      if (route === 'calendar') {
-        void loadCalendar({ silent: true })
-      } else if (route !== 'downloads' && route !== 'settings' && route !== 'search') {
+      if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
         void loadHub(route as HubPageResponse['page'], { silent: true })
       }
     }, 30000)
@@ -484,7 +461,7 @@ function App() {
               {error ? <p className="error-banner">{error}</p> : null}
             </div>
 
-            {route === 'calendar' ? <CalendarPage entries={calendarItems} loading={calendarLoading} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
+            {route === 'calendar' ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
             {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} downloads={downloads} onDelete={handleDeleteDownload} /> : null}
             {route === 'search' ? (
               <SearchPage
@@ -2607,64 +2584,162 @@ function DownloadRow(props: {
   )
 }
 
+function ArrowLeftGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <path d="M13 8H3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+      <path d="M6.75 4.25L3 8L6.75 11.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
 function CalendarPage(props: {
-  entries: CalendarEntry[]
-  loading: boolean
   onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
 }) {
-  if (props.loading) {
-    return <LoadingHub />
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [entries, setEntries] = useState<CalendarEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const nextUpRef = useRef<HTMLButtonElement>(null);
+  const [monthTransition, setMonthTransition] = useState<'idle' | 'next' | 'prev'>('idle');
+
+  useEffect(() => {
+    const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+    
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+
+    api.getCalendar(start, end)
+      .then((response) => {
+        if (!cancelled) {
+          setEntries(response.items);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load calendar');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDate]);
+
+  useEffect(() => {
+    if (monthTransition === 'idle') {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setCurrentDate(current => {
+        const newDate = new Date(current);
+        newDate.setDate(1);
+        newDate.setMonth(newDate.getMonth() + (monthTransition === 'next' ? 1 : -1));
+        return newDate;
+      });
+      setMonthTransition('idle');
+    }, 400); // Match animation duration
+
+    return () => clearTimeout(timeout);
+  }, [monthTransition]);
+
+  const now = new Date();
+
+  const filteredEntries = entries.filter(entry => {
+    const entryDate = new Date(entry.startsAt);
+    return entryDate.getFullYear() === currentDate.getFullYear() && entryDate.getMonth() === currentDate.getMonth();
+  });
+
+  const nextUpEntry = filteredEntries.find(entry => new Date(entry.startsAt) >= now);
+  const nextUpId = nextUpEntry?.id;
+
+  const groups = groupCalendarEntries(filteredEntries);
+
+  useLayoutEffect(() => {
+    if (nextUpRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const element = nextUpRef.current;
+      
+      const elementRect = element.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const scrollTop = element.offsetTop - container.offsetTop - (containerRect.height / 2) + (elementRect.height / 2);
+      
+      container.scrollTo({ top: scrollTop, behavior: 'auto' });
+    }
+  }, [groups]);
+
+  function changeMonth(offset: number) {
+    if (monthTransition !== 'idle') return;
+    setMonthTransition(offset > 0 ? 'next' : 'prev');
+  }
+  
+  if (loading && entries.length === 0) {
+    return <LoadingHub />;
   }
 
-  if (!props.entries.length) {
-    return (
-      <EmptyState
-        copy="Upcoming movies and shows will appear here"
-        title="Nothing upcoming"
-      />
-    )
+  if (error) {
+    return <EmptyState title="Error" copy={error} />;
   }
-
-  const groups = groupCalendarEntries(props.entries)
 
   return (
     <div className="calendar-page">
       <div className="calendar-header">
-        <h2>Upcoming</h2>
+        <button className="calendar-nav-button" onClick={() => changeMonth(-1)} disabled={monthTransition !== 'idle'}>
+          <ArrowLeftGlyph />
+        </button>
+        <h2>{currentDate.toLocaleString('en-US', { month: 'long' })}</h2>
+        <button className="calendar-nav-button" onClick={() => changeMonth(1)} disabled={monthTransition !== 'idle'}>
+          <ArrowRightGlyph />
+        </button>
       </div>
-      <div className="calendar-groups">
-        {groups.map((group) => (
-          <section className="calendar-group" key={group.key}>
-            <div className="calendar-group-header">
-              <strong>{group.label}</strong>
-            </div>
-            <div className="calendar-group-list">
-              {group.items.map((entry) => (
-                <button
-                  className="calendar-entry-card"
-                  key={entry.id}
-                  onClick={(event) => props.onOpenCard(entry.card, captureOriginRect(event.currentTarget))}
-                  type="button"
-                >
-                  <div className="calendar-entry-art">
-                    {entry.imageUrl ? <img alt={entry.title} loading="lazy" src={entry.imageUrl} /> : <div className="media-fallback">{entry.title.slice(0, 1).toUpperCase()}</div>}
-                  </div>
-                  <div className="calendar-entry-copy">
-                    <h4>{entry.title}</h4>
-                    <p className="calendar-entry-subtitle">{entry.subtitle}</p>
-                    <p className="calendar-entry-detail">{entry.detail}</p>
-                  </div>
-                  <div className="calendar-entry-time">
-                    <span>{formatCalendarTime(entry.startsAt)}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+      <div className="calendar-container">
+        <div className="calendar-scroll-container" ref={scrollContainerRef}>
+          <div className={`calendar-groups ${monthTransition !== 'idle' ? `month-transition-${monthTransition}` : ''}`}>
+            {groups.map((group) => (
+              <section className="calendar-group" key={group.key}>
+                <div className="calendar-group-header">
+                  <strong>{group.label}</strong>
+                </div>
+                <div className="calendar-group-list">
+                  {group.items.map((entry) => (
+                    <button
+                      ref={entry.id === nextUpId ? nextUpRef : null}
+                      className={`calendar-entry-card ${entry.id === nextUpId ? 'is-next-up' : ''}`}
+                      key={entry.id}
+                      onClick={(event) => props.onOpenCard(entry.card, captureOriginRect(event.currentTarget))}
+                      type="button"
+                    >
+                      <div className="calendar-entry-art">
+                        {entry.imageUrl ? <img alt={entry.title} loading="lazy" src={entry.imageUrl} /> : <div className="media-fallback">{entry.title.slice(0, 1).toUpperCase()}</div>}
+                      </div>
+                      <div className="calendar-entry-copy">
+                        <h4>{entry.title}</h4>
+                        <p className="calendar-entry-subtitle">{entry.subtitle}</p>
+                        <p className="calendar-entry-detail">{entry.detail}</p>
+                      </div>
+                      <div className="calendar-entry-time">
+                        <span>{formatCalendarTime(entry.startsAt)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }
 
 function humanizeDownloadState(state: string) {

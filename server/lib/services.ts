@@ -523,9 +523,7 @@ export async function getDownloads(config: AppConfig): Promise<DownloadItem[]> {
   return downloads.sort((a, b) => b.progress - a.progress);
 }
 
-export async function getCalendar(config: AppConfig): Promise<CalendarResponse> {
-  const start = startOfToday()
-  const end = addDays(start, 30)
+export async function getCalendar(config: AppConfig, start: Date, end: Date): Promise<CalendarResponse> {
 
   const [sonarrResult, radarrResult] = await Promise.allSettled([
     getSonarrCalendar(config, start, end),
@@ -3196,7 +3194,7 @@ async function getSonarrCalendar(config: AppConfig, start: Date, end: Date): Pro
   }
 
   return fetchJson<SonarrCalendarRecord[]>(
-    `${config.sonarr.baseUrl}/api/v3/calendar?includeSeries=true&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+    `${config.sonarr.baseUrl}/api/v3/calendar?includeSeries=true&unmonitored=true&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
     {
       headers: {
         'X-Api-Key': config.sonarr.apiKey
@@ -3211,7 +3209,7 @@ async function getRadarrCalendar(config: AppConfig, start: Date, end: Date): Pro
   }
 
   return fetchJson<RadarrCalendarRecord[]>(
-    `${config.radarr.baseUrl}/api/v3/calendar?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
+    `${config.radarr.baseUrl}/api/v3/calendar?unmonitored=true&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`,
     {
       headers: {
         'X-Api-Key': config.radarr.apiKey

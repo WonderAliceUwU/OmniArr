@@ -83,7 +83,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
-  getCalendar: () => request<CalendarResponse>('/api/calendar'),
+  getCalendar: (start: Date, end: Date) => request<CalendarResponse>(`/api/calendar?start=${start.toISOString()}&end=${end.toISOString()}`),
   getHub: (page: HubPageResponse['page']) => request<HubPageResponse>(`/api/hubs/${page}`),
   searchTitles: (query: string) => request<SearchResponse>(`/api/search?query=${encodeURIComponent(query)}`),
   getTitleDetails: (card: MediaCard, seasonId?: string) =>
