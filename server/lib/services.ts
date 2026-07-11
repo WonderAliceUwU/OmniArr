@@ -1897,7 +1897,7 @@ async function buildSeasonEpisodes(
       const airDate = sonarrEpisode?.airDateUtc || tmdbEpisode?.air_date || tvdbEpisode?.aired;
       const isReleased = !airDate || new Date(airDate).getTime() <= Date.now();
       const hasFile = Boolean(sonarrEpisode?.hasFile || sonarrEpisode?.episodeFileId);
-      const isAvailableInJellyfin = Boolean(jellyfinEpisode?.id);
+      const jellyfinKnowsAboutIt = Boolean(jellyfinEpisode?.id);
       const isDownloading = downloadingEpisodes.has(episodeNumber);
       const sonarrEpisodeId = sonarrEpisode?.id;
       const isProcessing = Boolean(
@@ -1907,7 +1907,7 @@ async function buildSeasonEpisodes(
       );
       const availability: TitleDetailsEpisode['availability'] = !isReleased
         ? 'unaired'
-        : isAvailableInJellyfin || hasFile
+        : hasFile
           ? 'available'
           : isDownloading
             ? 'downloading'
@@ -1937,7 +1937,7 @@ async function buildSeasonEpisodes(
         seasonNumber,
         episodeNumber,
         runtimeMinutes: tvdbEpisode?.runtime || sonarrEpisode?.runtime || jellyfinEpisode?.runtimeMinutes || tmdbEpisode?.runtime,
-        availableInJellyfin: isAvailableInJellyfin,
+        availableInJellyfin: availability === 'available' && jellyfinKnowsAboutIt,
         availability,
         downloadStatus,
         downloadProgress: isDownloading ? getEpisodeQueueProgress(queueEntry) : undefined,
