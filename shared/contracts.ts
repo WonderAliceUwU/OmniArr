@@ -200,6 +200,37 @@ export interface DownloadItem {
   mediaType?: 'movie' | 'tv' | 'series';
 }
 
+export interface ProcessingItem {
+  id: string;
+  source: 'sonarr' | 'radarr';
+  title: string;
+  subtitle?: string;
+  posterUrl?: string;
+  backdropUrl?: string;
+  tmdbId?: number;
+  mediaType?: 'movie' | 'tv' | 'series';
+  user: string;
+  createdAt: string;
+}
+
+export interface CompletedDownloadItem {
+  id: string;
+  source: 'sonarr' | 'radarr';
+  title: string;
+  subtitle?: string;
+  posterUrl?: string;
+  backdropUrl?: string;
+  tmdbId?: number;
+  mediaType?: 'movie' | 'tv' | 'series';
+  completedAt: string;
+}
+
+export interface DownloadsResponse {
+  processing: ProcessingItem[];
+  downloading: DownloadItem[];
+  completed: CompletedDownloadItem[];
+}
+
 export interface CalendarEntry {
   id: string;
   source: 'sonarr' | 'radarr';
@@ -230,6 +261,8 @@ export interface DashboardResponse {
   recommendations: MediaCard[];
   trendingSeries: MediaCard[];
   downloads: DownloadItem[];
+  processing: ProcessingItem[];
+  completedDownloads: CompletedDownloadItem[];
 }
 
 export interface TitleDetailsRequest {

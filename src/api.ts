@@ -5,6 +5,7 @@ import type {
   CalendarResponse,
   DashboardResponse,
   DownloadItem,
+  DownloadsResponse,
   HubPageResponse,
   MediaCard,
   SearchResponse,
@@ -96,31 +97,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getDownloads: () => request<DownloadItem[]>('/api/downloads'),
+  getDownloads: () => request<DownloadsResponse>('/api/downloads'),
   deleteDownload: (payload: { id: string }) =>
     request<{ ok: boolean }>('/api/downloads/delete', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  requestMovie: (tmdbId: number) =>
+  dismissCompleted: (payload: { id: string }) =>
+    request<{ ok: boolean }>('/api/downloads/dismiss', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  dismissAllCompleted: () =>
+    request<{ ok: boolean }>('/api/downloads/dismiss-all', {
+      method: 'POST',
+    }),
+  requestMovie: (tmdbId: number, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/movie', {
       method: 'POST',
-      body: JSON.stringify({ tmdbId }),
+      body: JSON.stringify({ tmdbId, user }),
     }),
-  requestSeries: (tmdbId: number) =>
+  requestSeries: (tmdbId: number, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/series', {
       method: 'POST',
-      body: JSON.stringify({ tmdbId }),
+body: JSON.stringify({ tmdbId, user }),
     }),
-  requestSeason: (payload: SeasonRequestPayload) =>
+  requestSeason: (payload: SeasonRequestPayload, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/season', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, user }),
     }),
-  requestEpisode: (payload: EpisodeRequestPayload) =>
+  requestEpisode: (payload: EpisodeRequestPayload, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/episode', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, user }),
     }),
   deleteSeason: (payload: SeasonDeletePayload) =>
     request<{ ok: boolean }>('/api/seasons/delete', {

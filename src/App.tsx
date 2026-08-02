@@ -17,9 +17,11 @@ import {
   type AppConfig,
   type AppRoute,
   type ConnectionStatus,
+  type CompletedDownloadItem,
   type DownloadItem,
   type HubPageResponse,
   type MediaCard,
+  type ProcessingItem,
   type SearchResponse,
   type SelectOption,
   type ServiceOptionsResponse,
@@ -81,6 +83,8 @@ function App() {
     radarrQualityProfiles: [],
   })
   const [downloads, setDownloads] = useState<DownloadItem[]>([])
+  const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([])
+  const [completedDownloads, setCompletedDownloads] = useState<CompletedDownloadItem[]>([])
   const [connections, setConnections] = useState<ConnectionStatus[]>([])
   const [hubPages, setHubPages] = useState<Partial<Record<HubPageResponse['page'], HubPageResponse>>>({})
   const [hubLoading, setHubLoading] = useState(false)
@@ -125,6 +129,8 @@ function App() {
     setConfig(settings)
     setOptions(serviceOptions)
     setDownloads(dashboard.downloads)
+    setProcessingItems(dashboard.processing || [])
+    setCompletedDownloads(dashboard.completedDownloads || [])
     setConnections(dashboard.connections)
     setEntryStage(resolveEntryStage(settings, serviceOptions))
   }
@@ -188,7 +194,12 @@ function App() {
       return
     }
 
-    if (route === 'downloads' || route === 'settings' || route === 'calendar' || route === 'search') {
+    if (route === 'settings' || route === 'calendar' || route === 'search') {
+      return
+    }
+
+    if (route === 'downloads') {
+      void refreshBaseData()
       return
     }
 
@@ -322,9 +333,9 @@ function App() {
     setNotice('')
     try {
       if (card.mediaType === 'movie') {
-        await api.requestMovie(card.tmdbId)
+        await api.requestMovie(card.tmdbId, currentJellyfinUser)
       } else {
-        await api.requestSeries(card.tmdbId)
+        await api.requestSeries(card.tmdbId, currentJellyfinUser)
       }
       if (route === 'calendar') {
         await loadCalendar({ silent: true })
@@ -345,13 +356,33 @@ function App() {
     setNotice('')
     try {
       await api.deleteDownload({ id })
-      const nextDownloads = await api.getDownloads()
-      setDownloads(nextDownloads)
+      const resp = await api.getDownloads()
+      setDownloads(resp.downloading)
+      setProcessingItems(resp.processing)
+      setCompletedDownloads(resp.completed)
       setNotice('Download removed from the queue.')
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Failed to remove the download.')
     } finally {
       setDownloadDeleteId('')
+    }
+  }
+
+  async function handleDismissCompleted(id: string) {
+    try {
+      await api.dismissCompleted({ id })
+      setCompletedDownloads((current) => current.filter((item) => item.id !== id))
+    } catch {
+      // silent
+    }
+  }
+
+  async function handleDismissAllCompleted() {
+    try {
+      await api.dismissAllCompleted()
+      setCompletedDownloads([])
+    } catch {
+      // silent
     }
   }
 
@@ -462,7 +493,7 @@ function App() {
             </div>
 
             {route === 'calendar' ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
-            {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} downloads={downloads} onDelete={handleDeleteDownload} /> : null}
+            {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} processingItems={processingItems} /> : null}
             {route === 'search' ? (
               <SearchPage
                 loading={searchLoading}
@@ -508,6 +539,7 @@ function App() {
           onClose={() => setSelectedCard(null)}
           originRect={selectedCard.originRect}
           onRequest={handleRequest}
+          currentUser={currentJellyfinUser}
         />
       ) : null}
     </div>
@@ -909,9 +941,31 @@ function HubPageView(props: {
         <SectionCarousel busy={props.busy} onOpenCard={props.onOpenCard} onRequest={props.onRequest} section={{ id: 'continue', title: 'Continue Watching', style: 'episode', items: props.hub.continueWatching }} />
       ) : null}
       {props.hub.sections.map((section) => (
-        <SectionCarousel busy={props.busy} key={section.id} onOpenCard={props.onOpenCard} onRequest={props.onRequest} section={section} />
+        section.id === 'library-movies' || section.id === 'library-series'
+          ? <LibraryGrid busy={props.busy} key={section.id} onOpenCard={props.onOpenCard} onRequest={props.onRequest} section={section} />
+          : <SectionCarousel busy={props.busy} key={section.id} onOpenCard={props.onOpenCard} onRequest={props.onRequest} section={section} />
       ))}
     </div>
+  )
+}
+
+function LibraryGrid(props: {
+  section: HubPageResponse['sections'][number]
+  onRequest: (card: MediaCard) => Promise<void>
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
+  busy: boolean
+}) {
+  if (!props.section.items.length) return null
+
+  return (
+    <section className="library-grid-section">
+      <div className="carousel-title">{props.section.title}</div>
+      <div className="carousel-section library-grid">
+        {props.section.items.map((card) => (
+          <MediaTile busy={props.busy} card={card} isContinueWatching={false} key={card.id} onOpenCard={props.onOpenCard} onRequest={props.onRequest} styleType="landscape" />
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -1258,6 +1312,7 @@ function TitleDetailsModal(props: {
   onClose: () => void
   originRect: ModalOriginRect | null
   onRequest: (card: MediaCard) => Promise<void>
+  currentUser: string | null
 }) {
   const [details, setDetails] = useState<TitleDetailsResponse | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(true)
@@ -1803,7 +1858,7 @@ function TitleDetailsModal(props: {
         await api.requestSeason({
           seriesId: details.sonarrSeriesId,
           seasonNumber: activeSeasonNumber,
-        })
+        }, props.currentUser)
       } else {
         await props.onRequest(props.card)
       }
@@ -1895,7 +1950,7 @@ function TitleDetailsModal(props: {
       canDownload: false,
     }))
 
-    void api.requestEpisode({ episodeId: sonarrEpisodeId })
+    void api.requestEpisode({ episodeId: sonarrEpisodeId }, props.currentUser)
       .catch(() => {
         setPendingEpisodeRequestIds((current) => current.filter((id) => id !== episodeId))
         updateEpisodeInCaches(episodeId, (episode) => ({
@@ -2500,30 +2555,240 @@ function SearchPage(props: {
   )
 }
 
+function CollapsibleSection(props: {
+  title: string
+  count: number
+  children: ReactNode
+}) {
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  return (
+    <section className="downloads-section">
+      <button
+        className="downloads-section-header"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        type="button"
+      >
+        <h2>{props.title} ({props.count})</h2>
+        <span className={isCollapsed ? 'collapse-arrow' : 'collapse-arrow expanded'}>
+          <svg viewBox="0 0 16 16" fill="none" >
+            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </button>
+      {!isCollapsed && <div className="downloads-grid">{props.children}</div>}
+    </section>
+  )
+}
+
+function ProcessingCard(props: {
+  item: ProcessingItem,
+  onCancel: (id: string) => void
+}) {
+  return (
+    <div className="download-card processing-card">
+      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
+      <div className="download-card-overlay" />
+      <div className="download-card-content">
+        <div className="download-card-spinner">
+          <div className="loading-orb" />
+        </div>
+        <div className="download-card-info">
+          <h3>{props.item.title}</h3>
+          <p>{props.item.subtitle}</p>
+          <p className="download-card-user">Requested by: {props.item.user}</p>
+        </div>
+        <button
+          className="download-card-cancel"
+          onClick={() => props.onCancel(props.item.id)}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function DownloadingCard(props: {
+  item: DownloadItem,
+  onCancel: (id: string) => void
+}) {
+  return (
+    <div className="download-card downloading-card">
+      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
+      <div className="download-card-overlay" />
+      <div className="download-card-content">
+        <div className="download-card-info">
+          <h3>{props.item.title}</h3>
+          <p>{props.item.subtitle}</p>
+        </div>
+        <button
+          className="download-card-cancel"
+          onClick={() => props.onCancel(props.item.id)}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
+      <div className="download-card-progress">
+        <div className="download-card-progress-bar" style={{ width: `${props.item.progress}%` }} />
+      </div>
+       <p className="download-card-details">{props.item.size} @ {props.item.eta}</p>
+    </div>
+  )
+}
+
+function CompletedCard(props: {
+  item: CompletedDownloadItem,
+  onDismiss: (id: string) => void
+}) {
+  return (
+    <div className="download-card completed-card">
+      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
+      <div className="download-card-overlay" />
+      <div className="download-card-content">
+        <div className="download-card-info">
+          <h3>{props.item.title}</h3>
+          <p>{props.item.subtitle}</p>
+          <p className="download-card-completed-badge">Completed</p>
+        </div>
+        <button
+          className="download-card-cancel"
+          onClick={() => props.onDismiss(props.item.id)}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DownloadsPage(props: {
   downloads: DownloadItem[]
+  processingItems: ProcessingItem[]
+  completedDownloads: CompletedDownloadItem[]
   busyId: string
   onDelete: (id: string) => Promise<void>
+  onDismissCompleted: (id: string) => void
+  onDismissAllCompleted: () => void
 }) {
+  const hasAny = props.processingItems.length > 0 || props.downloads.length > 0 || props.completedDownloads.length > 0
+
   return (
     <div className="downloads-page">
       <div className="downloads-header">
         <h2><DownloadGlyph /> <span>Downloads</span></h2>
       </div>
-      <section className="downloads-section">
-        <div className="downloads-grid">
-          {props.downloads.length
-            ? props.downloads.map((item) => (
-                <DownloadRow
-                  busy={props.busyId === item.id}
-                  item={item}
-                  key={item.id}
-                  onDelete={props.onDelete}
-                />
-              ))
-            : <EmptyState copy="The queue will appear here as soon as your services start working." title="No active downloads" />}
-        </div>
-      </section>
+
+      {props.processingItems.length > 0 ? (
+        <section className="downloads-section">
+          <h3 className="downloads-section-title">Processing</h3>
+          <div className="downloads-grid">
+            {props.processingItems.map((item) => (
+              <article className="download-row download-row-processing" key={item.id}>
+                <div className="download-card">
+                  <div className="download-artwork">
+                    {item.posterUrl || item.backdropUrl
+                      ? <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                      : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
+                  </div>
+                  <div className="download-copy">
+                    <h4>{item.title}</h4>
+                    {item.subtitle ? <p className="download-subtitle">{item.subtitle}</p> : null}
+                    <p className="download-detail download-processing-label">
+                      <span className="download-processing-spinner" aria-hidden="true" />
+                      Searching…
+                    </p>
+                  </div>
+                </div>
+                <div className="download-side">
+                  <div className="download-progress-panel">
+                    <div className="download-progress-header">
+                      <span className="download-processing-badge">Processing</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {props.downloads.length > 0 ? (
+        <section className="downloads-section">
+          <h3 className="downloads-section-title">Downloading</h3>
+          <div className="downloads-grid">
+            {props.downloads.map((item) => (
+              <DownloadRow
+                busy={props.busyId === item.id}
+                item={item}
+                key={item.id}
+                onDelete={props.onDelete}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {props.completedDownloads.length > 0 ? (
+        <section className="downloads-section">
+          <div className="downloads-section-header">
+            <h3 className="downloads-section-title">Completed</h3>
+            <button className="downloads-dismiss-all-button" onClick={props.onDismissAllCompleted} type="button">
+              Dismiss all
+            </button>
+          </div>
+          <div className="downloads-grid">
+            {props.completedDownloads.map((item) => (
+              <article className="download-row download-row-completed" key={item.id}>
+                <div className="download-card">
+                  <div className="download-artwork">
+                    {item.posterUrl || item.backdropUrl
+                      ? <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                      : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
+                  </div>
+                  <div className="download-copy">
+                    <h4>{item.title}</h4>
+                    {item.subtitle ? <p className="download-subtitle">{item.subtitle}</p> : null}
+                    <p className="download-detail download-completed-label">Download completed</p>
+                  </div>
+                </div>
+                <div className="download-side">
+                  <div className="download-progress-panel">
+                    <div className="download-progress-header">
+                      <strong className="download-completed-badge">100%</strong>
+                      <span>Completed</span>
+                    </div>
+                    <div className="download-progress-row">
+                      <div className="download-progress-bar download-progress-complete">
+                        <div className="download-progress-fill" style={{ width: '100%' }} />
+                      </div>
+                      <button
+                        aria-label={`Dismiss ${item.title}`}
+                        className="download-action-button download-delete-button"
+                        onClick={() => props.onDismissCompleted(item.id)}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!hasAny ? (
+        <section className="downloads-section">
+          <div className="downloads-grid">
+            <EmptyState copy="The queue will appear here as soon as your services start working." title="No active downloads" />
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }

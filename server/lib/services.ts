@@ -2,14 +2,17 @@ import type {
   AppConfig,
   CalendarEntry,
   CalendarResponse,
+  CompletedDownloadItem,
   ConnectionStatus,
   DashboardResponse,
   DownloadItem,
+  DownloadsResponse,
   EpisodeRequestPayload,
   EpisodeWatchStateRequest,
   HubPageResponse,
   HubSection,
   MediaCard,
+  ProcessingItem,
   SeasonDeletePayload,
   SeasonRequestPayload,
   SelectOption,
@@ -22,6 +25,88 @@ import type {
 } from '../../shared/contracts.js';
 
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
+
+const PROCESSING_TTL_MS = 60 * 60 * 1000; // 1 hour max
+const processingQueue: ProcessingItem[] = [];
+const completedDownloads: CompletedDownloadItem[] = [];
+let previousDownloadIds = new Set<string>();
+
+export function addProcessingItem(item: Omit<ProcessingItem, 'id' | 'createdAt'>): void {
+  const id = `proc-${item.source}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  processingQueue.push({
+    ...item,
+    id,
+    user: item.user || 'Unknown',
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export function getProcessingItems(): ProcessingItem[] {
+  const now = Date.now();
+  // Remove expired items (older than 1 hour)
+  for (let i = processingQueue.length - 1; i >= 0; i--) {
+    if (now - new Date(processingQueue[i].createdAt).getTime() > PROCESSING_TTL_MS) {
+      processingQueue.splice(i, 1);
+    }
+  }
+  return [...processingQueue];
+}
+
+function reconcileProcessingWithDownloads(downloads: DownloadItem[]): void {
+  const downloadTitles = new Set(downloads.map((d) => d.title.toLowerCase()));
+  for (let i = processingQueue.length - 1; i >= 0; i--) {
+    if (downloadTitles.has(processingQueue[i].title.toLowerCase())) {
+      processingQueue.splice(i, 1);
+    }
+  }
+}
+
+function detectCompletedDownloads(currentDownloads: DownloadItem[]): void {
+  const currentIds = new Set(currentDownloads.map((d) => d.id));
+  // Items that were downloading before but are no longer in the queue = completed
+  for (const prevId of previousDownloadIds) {
+    if (!currentIds.has(prevId)) {
+      // Find the item info from the last known state — we stored it below
+      const cached = lastKnownDownloads.get(prevId);
+      if (cached) {
+        completedDownloads.push({
+          id: `done-${prevId}-${Date.now()}`,
+          source: cached.source,
+          title: cached.title,
+          subtitle: cached.subtitle,
+          posterUrl: cached.posterUrl,
+          backdropUrl: cached.backdropUrl,
+          tmdbId: cached.tmdbId,
+          mediaType: cached.mediaType,
+          completedAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
+  // Update tracking state
+  previousDownloadIds = currentIds;
+  lastKnownDownloads.clear();
+  for (const d of currentDownloads) {
+    lastKnownDownloads.set(d.id, d);
+  }
+}
+
+const lastKnownDownloads = new Map<string, DownloadItem>();
+
+export function getCompletedDownloads(): CompletedDownloadItem[] {
+  return [...completedDownloads];
+}
+
+export function dismissCompletedDownload(id: string): void {
+  const idx = completedDownloads.findIndex((item) => item.id === id);
+  if (idx !== -1) {
+    completedDownloads.splice(idx, 1);
+  }
+}
+
+export function dismissAllCompletedDownloads(): void {
+  completedDownloads.length = 0;
+}
 
 interface JellyfinItem {
   Id?: string;
@@ -162,16 +247,18 @@ interface TvdbSeriesRecord {
   overview?: string;
   image?: string;
   artworks?: Array<{ image?: string; type?: number }>;
-  seasons?: Array<{
-    id?: number;
-    number?: number;
-    image?: string;
+  seasons?: TvdbSeasonRecord[];
+}
+
+interface TvdbSeasonRecord {
+  id?: number;
+  number?: number;
+  image?: string;
+  name?: string;
+  type?: {
     name?: string;
-    type?: {
-      name?: string;
-      type?: string;
-    };
-  }>;
+    type?: string;
+  };
 }
 
 interface TvdbEpisodeRecord {
@@ -253,6 +340,7 @@ interface SeriesSeasonDescriptor {
   title: string;
   seasonNumber?: number;
   episodeCount?: number;
+  hasTmdbSeason?: boolean;
   jellyfinSeasonId?: string;
   imageUrl?: string;
 }
@@ -378,7 +466,9 @@ export async function getDashboard(config: AppConfig): Promise<DashboardResponse
     recentlyAdded: library.recentlyAdded,
     recommendations: filteredRecommendations.slice(0, 12),
     trendingSeries: filteredTrendingSeries.slice(0, 12),
-    downloads
+    downloads,
+    processing: getProcessingItems(),
+    completedDownloads: getCompletedDownloads()
   };
 }
 
@@ -388,17 +478,12 @@ export async function getHubPage(
 ): Promise<HubPageResponse> {
   console.log(`[getHubPage] Loading page: ${page}`);
   let library: { continueWatching: MediaCard[]; recentlyAdded: MediaCard[]; allItems: JellyfinItem[] };
-  let downloads: DownloadItem[];
 
   try {
-    [library, downloads] = await Promise.all([
-      getLibrarySnapshot(config),
-      getDownloads(config)
-    ]);
+    library = await getLibrarySnapshot(config);
   } catch (err) {
-    console.error(`[getHubPage] Error fetching library/downloads for ${page}:`, err);
+    console.error(`[getHubPage] Error fetching library for ${page}:`, err);
     library = { continueWatching: [], recentlyAdded: [], allItems: [] };
-    downloads = [];
   }
 
   const allSections = await buildHubSections(config, library, page).catch((err) => {
@@ -459,16 +544,6 @@ export async function getHubPage(
     continueWatching: continueWatchingWithLogos,
     sections: sectionsWithLogos
       .filter((section) => section.items.some((item) => item.backdropUrl || item.posterUrl))
-      .concat(
-      page === 'library' && downloads.length
-        ? [{
-            id: 'downloads',
-            title: 'Downloading',
-            style: 'episode',
-            items: downloads.map(downloadToCard)
-          }]
-        : []
-    )
   };
 }
 
@@ -520,7 +595,23 @@ export async function getDownloads(config: AppConfig): Promise<DownloadItem[]> {
   const downloads = await Promise.all(
     baseDownloads.map((item) => enrichDownloadItem(config, item, metadataCache))
   );
-  return downloads.sort((a, b) => b.progress - a.progress);
+  const sorted = downloads.sort((a, b) => b.progress - a.progress);
+
+  // Reconcile processing queue: remove items that now appear as downloads
+  reconcileProcessingWithDownloads(sorted);
+  // Detect completed downloads: items that disappeared from the queue
+  detectCompletedDownloads(sorted);
+
+  return sorted;
+}
+
+export async function getDownloadsResponse(config: AppConfig): Promise<DownloadsResponse> {
+  const downloading = await getDownloads(config);
+  return {
+    processing: getProcessingItems(),
+    downloading,
+    completed: getCompletedDownloads(),
+  };
 }
 
 export async function getCalendar(config: AppConfig, start: Date, end: Date): Promise<CalendarResponse> {
@@ -1231,7 +1322,7 @@ function hasLikelyJapaneseText(value: string | undefined): boolean {
 
 async function getTvdbTranslation(
   config: AppConfig,
-  entity: 'episodes' | 'series',
+  entity: 'episodes' | 'seasons' | 'series',
   id: number
 ): Promise<TvdbTranslationRecord | null> {
   const candidates = getTvdbTranslationCandidates(config);
@@ -1290,12 +1381,50 @@ async function applyTvdbEpisodeTranslations(
   );
 }
 
+async function applyTvdbSeasonTranslations(
+  config: AppConfig,
+  seasons: TvdbSeasonRecord[]
+): Promise<TvdbSeasonRecord[]> {
+  if (!getTvdbTranslationCandidates(config).length) {
+    return seasons;
+  }
+
+  return Promise.all(
+    seasons.map(async (season) => {
+      if (!season.id) {
+        return season;
+      }
+
+      const translation = await getTvdbTranslation(config, 'seasons', season.id);
+      return translation?.name ? { ...season, name: translation.name } : season;
+    })
+  );
+}
+
 async function getTvdbSeriesSummary(config: AppConfig, tvdbId: number): Promise<TvdbSeriesRecord | null> {
   const response = await tvdbFetch(config, `/series/${encodeURIComponent(String(tvdbId))}/extended`);
   const data = asRecord(response?.data);
   if (!data.id) {
     return null;
   }
+
+  const seasons = await applyTvdbSeasonTranslations(
+    config,
+    asArray(data.seasons).map((entry) => {
+      const season = asRecord(entry);
+      const type = asRecord(season.type);
+      return {
+        id: Number(season.id || 0) || undefined,
+        number: Number(season.number || 0) || undefined,
+        image: typeof season.image === 'string' ? season.image : undefined,
+        name: typeof season.name === 'string' ? season.name : undefined,
+        type: {
+          name: typeof type.name === 'string' ? type.name : undefined,
+          type: typeof type.type === 'string' ? type.type : undefined
+        }
+      } satisfies TvdbSeasonRecord;
+    })
+  );
 
   return {
     id: Number(data.id || 0) || undefined,
@@ -1309,20 +1438,7 @@ async function getTvdbSeriesSummary(config: AppConfig, tvdbId: number): Promise<
         type: Number(artwork.type || 0) || undefined
       };
     }),
-    seasons: asArray(data.seasons).map((entry) => {
-      const season = asRecord(entry);
-      const type = asRecord(season.type);
-      return {
-        id: Number(season.id || 0) || undefined,
-        number: Number(season.number || 0) || undefined,
-        image: typeof season.image === 'string' ? season.image : undefined,
-        name: typeof season.name === 'string' ? season.name : undefined,
-        type: {
-          name: typeof type.name === 'string' ? type.name : undefined,
-          type: typeof type.type === 'string' ? type.type : undefined
-        }
-      };
-    })
+    seasons
   };
 }
 
@@ -1447,7 +1563,7 @@ async function getTmdbSeasonEpisodes(
 ): Promise<TmdbEpisodeRecord[]> {
   const response = await tmdbFetch(
     config,
-    `/tv/${tmdbId}/season/${seasonNumber}`
+    `/tv/${tmdbId}/season/${seasonNumber}?language=${encodeURIComponent(config.preferences.language)}`
   );
 
   return asArray(response?.episodes)
@@ -1712,11 +1828,21 @@ function buildSeriesSeasonDescriptors(
 
   const tvdbSeasonBySeasonNumber = new Map(
     asArray(tvdbSeries?.seasons)
-      .map((entry) => entry as NonNullable<TvdbSeriesRecord['seasons']>[number])
+      .map((entry) => entry as TvdbSeasonRecord)
       .filter((season) => typeof season.number === 'number' && season.number >= 0)
       .map((season) => [season.number as number, season] as const)
   );
-
+  const tmdbSeasonBySeasonNumber = new Map(
+    asArray(tmdbSeries?.seasons)
+      .map((entry) => asRecord(entry))
+      .map((season) => ({
+        seasonNumber: Number(season.season_number || 0),
+        name: typeof season.name === 'string' ? season.name : '',
+        episodeCount: Number(season.episode_count || 0) || undefined
+      } satisfies TmdbSeasonSummary))
+      .filter((season) => Number.isFinite(season.seasonNumber) && season.seasonNumber >= 0)
+      .map((season) => [season.seasonNumber, season] as const)
+  );
   const seasonNumbers = new Set<number>([
     ...tvdbEpisodeCountBySeasonNumber.keys(),
     ...tvdbSeasonBySeasonNumber.keys(),
@@ -1730,16 +1856,23 @@ function buildSeriesSeasonDescriptors(
       .map((seasonNumber) => {
         const jellyfinSeason = jellyfinBySeasonNumber.get(seasonNumber);
         const tvdbSeason = tvdbSeasonBySeasonNumber.get(seasonNumber);
+        const tmdbSeason = tmdbSeasonBySeasonNumber.get(seasonNumber);
+        const episodeCount = tvdbEpisodeCountBySeasonNumber.get(seasonNumber)
+          ?? sonarrEpisodeCountBySeasonNumber.get(seasonNumber)
+          ?? jellyfinSeason?.episodeCount;
 
         return {
           id: buildSeasonId(seasonNumber),
           title: seasonNumber === 0
-            ? jellyfinSeason?.title || tvdbSeason?.name || 'Specials'
-            : jellyfinSeason?.title || tvdbSeason?.name || `Season ${seasonNumber}`,
+            ? tvdbSeason?.name || jellyfinSeason?.title || 'Specials'
+            : tvdbSeason?.name || jellyfinSeason?.title || `Season ${seasonNumber}`,
           seasonNumber,
-          episodeCount: tvdbEpisodeCountBySeasonNumber.get(seasonNumber)
-            ?? sonarrEpisodeCountBySeasonNumber.get(seasonNumber)
-            ?? jellyfinSeason?.episodeCount,
+          episodeCount,
+          hasTmdbSeason: Boolean(
+            tmdbSeason
+            && episodeCount
+            && tmdbSeason.episodeCount === episodeCount
+          ),
           jellyfinSeasonId: jellyfinSeason?.jellyfinSeasonId
         };
       })
@@ -1770,6 +1903,7 @@ function buildSeriesSeasonDescriptors(
             : season.name || `Season ${season.seasonNumber}`,
           seasonNumber: season.seasonNumber,
           episodeCount: season.episodeCount ?? jellyfinSeason?.episodeCount,
+          hasTmdbSeason: true,
           jellyfinSeasonId: jellyfinSeason?.jellyfinSeasonId
         };
       })
@@ -1835,7 +1969,7 @@ async function buildSeasonEpisodes(
 ): Promise<TitleDetailsEpisode[]> {
   const seasonNumber = season.seasonNumber;
   const [tmdbEpisodes, jellyfinEpisodes] = await Promise.all([
-    tmdbId && typeof seasonNumber === 'number'
+    tmdbId && season.hasTmdbSeason && typeof seasonNumber === 'number'
       ? getTmdbSeasonEpisodes(config, tmdbId, seasonNumber)
       : Promise.resolve([]),
     jellyfinSeriesId && season.jellyfinSeasonId
@@ -1922,8 +2056,8 @@ async function buildSeasonEpisodes(
         id: jellyfinEpisode?.id || buildEpisodeId(seasonNumber, episodeNumber),
         sonarrEpisodeId,
         seasonId: season.id,
-        title: tvdbEpisode?.name || sonarrEpisode?.title || jellyfinEpisode?.title || tmdbEpisode?.name || `Episode ${episodeNumber}`,
-        overview: tvdbEpisode?.overview || sonarrEpisode?.overview || jellyfinEpisode?.overview || tmdbEpisode?.overview || '',
+        title: tmdbEpisode?.name || tvdbEpisode?.name || sonarrEpisode?.title || jellyfinEpisode?.title || `Episode ${episodeNumber}`,
+        overview: tmdbEpisode?.overview || tvdbEpisode?.overview || sonarrEpisode?.overview || jellyfinEpisode?.overview || '',
         subtitle: [
           typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : '',
           `Episode ${episodeNumber}`
@@ -2186,7 +2320,7 @@ function mapJellyfinEpisode(episode: JellyfinItem): TitleDetailsEpisode {
   };
 }
 
-export async function requestMovie(config: AppConfig, tmdbId: number): Promise<void> {
+export async function requestMovie(config: AppConfig, tmdbId: number, user: string | null): Promise<void> {
   if (!config.radarr.baseUrl || !config.radarr.apiKey) {
     throw new Error('Radarr is not configured.');
   }
@@ -2260,9 +2394,19 @@ export async function requestMovie(config: AppConfig, tmdbId: number): Promise<v
       movieIds: [movie.id]
     })
   });
+
+  addProcessingItem({
+    source: 'radarr',
+    title: movie.title || 'Movie',
+    subtitle: movie.year ? String(movie.year) : undefined,
+    tmdbId: movie.tmdbId,
+    posterUrl: extractRemoteImage(movie.images),
+    mediaType: 'movie',
+    user: user || 'Unknown',
+  });
 }
 
-export async function requestSeries(config: AppConfig, tmdbId: number): Promise<void> {
+export async function requestSeries(config: AppConfig, tmdbId: number, user: string | null): Promise<void> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
     throw new Error('Sonarr is not configured.');
   }
@@ -2280,6 +2424,15 @@ export async function requestSeries(config: AppConfig, tmdbId: number): Promise<
     throw new Error('This series does not have a TVDB ID for Sonarr.');
   }
   const sonarrRequestConfig = await resolveSonarrRequestConfig(config);
+
+  addProcessingItem({
+    source: 'sonarr',
+    title: details.name || 'Series',
+    subtitle: 'All seasons',
+    tmdbId,
+    mediaType: 'series',
+    user: user || 'Unknown',
+  });
 
   await fetchJson(`${config.sonarr.baseUrl}/api/v3/series`, {
     method: 'POST',
@@ -2302,9 +2455,17 @@ export async function requestSeries(config: AppConfig, tmdbId: number): Promise<
       }
     })
   });
+
+  addProcessingItem({
+    source: 'sonarr',
+    title: String(details.name || details.original_name || 'Series'),
+    tmdbId,
+    mediaType: 'tv',
+    requestedBy: 'You',
+  });
 }
 
-export async function requestSeason(config: AppConfig, payload: SeasonRequestPayload): Promise<void> {
+export async function requestSeason(config: AppConfig, payload: SeasonRequestPayload, user: string | null): Promise<void> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
     throw new Error('Sonarr is not configured.');
   }
@@ -2352,9 +2513,18 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
       seasonNumber: payload.seasonNumber
     })
   });
+
+  addProcessingItem({
+    source: 'sonarr',
+    title: series.title || 'Series',
+    subtitle: `Season ${payload.seasonNumber}`,
+    tmdbId: series.tmdbId,
+    mediaType: 'tv',
+    user: user || 'Unknown',
+  });
 }
 
-export async function requestEpisode(config: AppConfig, payload: EpisodeRequestPayload): Promise<void> {
+export async function requestEpisode(config: AppConfig, payload: EpisodeRequestPayload, user: string | null): Promise<void> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
     throw new Error('Sonarr is not configured.');
   }
@@ -2374,6 +2544,32 @@ export async function requestEpisode(config: AppConfig, payload: EpisodeRequestP
       episodeIds: [payload.episodeId]
     })
   });
+
+  // Try to get episode details for the processing item
+  try {
+    const episode = await fetchJson<{ title?: string; seasonNumber?: number; episodeNumber?: number; series?: { title?: string; tmdbId?: number } }>(
+      `${config.sonarr.baseUrl}/api/v3/episode/${encodeURIComponent(String(payload.episodeId))}`,
+      { headers: { 'X-Api-Key': config.sonarr.apiKey } }
+    );
+    addProcessingItem({
+      source: 'sonarr',
+      title: episode?.series?.title || 'Series',
+      subtitle: episode?.seasonNumber != null && episode?.episodeNumber != null
+        ? `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} \u00b7 ${episode.title || ''}`
+        : episode?.title || 'Episode',
+      tmdbId: episode?.series?.tmdbId,
+      mediaType: 'tv',
+      user: user || 'Unknown',
+    });
+  } catch {
+    addProcessingItem({
+      source: 'sonarr',
+      title: 'Episode',
+      subtitle: `Episode #${payload.episodeId}`,
+      mediaType: 'tv',
+      user: user || 'Unknown',
+    });
+  }
 }
 
 export async function deleteSeasonFiles(config: AppConfig, payload: SeasonDeletePayload): Promise<void> {
@@ -2502,11 +2698,11 @@ async function getLibrarySnapshot(config: AppConfig): Promise<{
 
   try {
     [resume, nextUp, allItems] = await Promise.all([
-      jellyfinFetch<JellyfinItem[]>(config, `/Users/${config.jellyfin.userId}/Items/Resume?mediaTypes=Video&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber`),
-      jellyfinFetch<JellyfinItem[]>(config, `/Shows/NextUp?userId=${config.jellyfin.userId}&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber`),
+      jellyfinFetch<JellyfinItem[]>(config, `/Users/${config.jellyfin.userId}/Items/Resume?mediaTypes=Video&enableUserData=true&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
+      jellyfinFetch<JellyfinItem[]>(config, `/Shows/NextUp?userId=${config.jellyfin.userId}&enableUserData=true&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
       jellyfinFetch<JellyfinItem[]>(
         config,
-        `/Users/${config.jellyfin.userId}/Items?recursive=true&includeItemTypes=Movie,Series&hasTmdbId=true&fields=ProviderIds,DateCreated,DateLastMediaAdded,Overview,ImageTags,BackdropImageTags,ProductionYear`
+        `/Users/${config.jellyfin.userId}/Items?recursive=true&includeItemTypes=Movie,Series&fields=ProviderIds,DateCreated,DateLastMediaAdded,Overview,ImageTags,BackdropImageTags,ProductionYear`
       )
     ]);
   } catch {
@@ -2893,16 +3089,29 @@ async function buildDoramaHub(
 }
 
 async function buildLibraryHub(
-  config: AppConfig,
+  _config: AppConfig,
   library: Awaited<ReturnType<typeof getLibrarySnapshot>>
 ): Promise<{ hero: MediaCard[]; sections: HubSection[] }> {
-  const downloads = await getDownloads(config);
+  const libraryItems = (type: 'Movie' | 'Series') => library.allItems
+    .filter((item) => item.Type === type)
+    .map((item) => jellyfinToCard(item, item.Name || 'Library'))
+    .filter(Boolean) as MediaCard[];
 
   return {
-    hero: [...(library.continueWatching || []), ...(library.recentlyAdded || [])].slice(0, 6),
+    hero: (library.recentlyAdded || []).slice(0, 6),
     sections: [
-      { id: 'recent', title: 'Recently Added', style: 'landscape', items: library.recentlyAdded || [] },
-      { id: 'downloads', title: 'Downloading', style: 'episode', items: (downloads || []).map(downloadToCard) }
+      {
+        id: 'library-series',
+        title: 'Series',
+        style: 'landscape',
+        items: libraryItems('Series')
+      },
+      {
+        id: 'library-movies',
+        title: 'Movies',
+        style: 'landscape',
+        items: libraryItems('Movie')
+      }
     ]
   };
 }
