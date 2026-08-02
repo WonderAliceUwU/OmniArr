@@ -1946,7 +1946,45 @@ function TitleDetailsModal(props: {
         seriesId: details.sonarrSeriesId,
         seasonNumber: activeSeasonNumber,
       })
-      await refreshSeasonState(seasonValue || undefined)
+      setDetails((current) => current
+        ? {
+            ...current,
+            episodes: current.episodes.map((episode) => {
+              if (episode.seasonId !== seasonValue || episode.availability === 'unaired') {
+                return episode
+              }
+
+              return {
+                ...episode,
+                availableInJellyfin: false,
+                availability: 'missing',
+                downloadStatus: 'idle',
+                downloadProgress: undefined,
+                canDownload: true,
+                canDelete: false,
+              }
+            }),
+            seasons: current.seasons.map((season) => season.id === seasonValue
+              ? {
+                  ...season,
+                  availableEpisodeCount: 0,
+                  missingEpisodeCount: current.episodes.filter(
+                    (episode) => episode.seasonId === seasonValue && episode.availability !== 'unaired'
+                  ).length,
+                  canDownload: true,
+                  canDelete: false,
+                  isDownloading: false,
+                  downloadStatus: 'idle',
+                  downloadProgress: undefined,
+                  downloadLabel: undefined,
+                }
+              : season),
+          }
+        : current)
+
+      window.setTimeout(() => {
+        void refreshSeasonState(seasonValue || undefined)
+      }, 2000)
     } catch (error) {
       setDetailsError(error instanceof Error ? error.message : 'Failed to delete season files.')
     } finally {
