@@ -32,7 +32,10 @@ import {
   requestSeason,
   requestSeries,
   setEpisodeWatchState,
-  sanitizeConfig
+  sanitizeConfig,
+  getDownloadsResponse,
+  dismissCompletedDownload,
+  dismissAllCompletedDownloads
 } from './lib/services.js';
 
 interface SessionRecord {
@@ -228,7 +231,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/downloads' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
-    sendJson(response, 200, await getDownloads(config));
+    sendJson(response, 200, await getDownloadsResponse(config));
     return;
   }
 
@@ -296,34 +299,47 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     return;
   }
 
+  if (url.pathname === '/api/downloads/dismiss' && method === 'POST') {
+    const body = await readJson<{ id: string }>(request);
+    dismissCompletedDownload(String(body.id || ''));
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/downloads/dismiss-all' && method === 'POST') {
+    dismissAllCompletedDownloads();
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   if (url.pathname === '/api/requests/movie' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<{ tmdbId: number }>(request);
-    await requestMovie(config, Number(body.tmdbId));
+    const body = await readJson<{ tmdbId: number; user: string | null }>(request);
+    await requestMovie(config, Number(body.tmdbId), body.user);
     sendJson(response, 200, { ok: true });
     return;
   }
 
   if (url.pathname === '/api/requests/series' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<{ tmdbId: number }>(request);
-    await requestSeries(config, Number(body.tmdbId));
+    const body = await readJson<{ tmdbId: number; user: string | null }>(request);
+    await requestSeries(config, Number(body.tmdbId), body.user);
     sendJson(response, 200, { ok: true });
     return;
   }
 
   if (url.pathname === '/api/requests/season' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<SeasonRequestPayload>(request);
-    await requestSeason(config, body);
+    const body = await readJson<SeasonRequestPayload & { user: string | null }>(request);
+    await requestSeason(config, body, body.user);
     sendJson(response, 200, { ok: true });
     return;
   }
 
   if (url.pathname === '/api/requests/episode' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<EpisodeRequestPayload>(request);
-    await requestEpisode(config, body);
+    const body = await readJson<EpisodeRequestPayload & { user:string | null }>(request);
+    await requestEpisode(config, body, body.user);
     sendJson(response, 200, { ok: true });
     return;
   }
