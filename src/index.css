@@ -1904,7 +1904,7 @@ img {
   display: grid;
   gap: 0.16rem;
   min-width: 0;
-  padding: 0 1.7rem 0 0.15rem;
+  padding: 0 0.15rem;
   color: #eef3ff;
 }
 
@@ -1917,15 +1917,20 @@ img {
 }
 
 .title-season-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
   min-height: 2.1rem;
   padding: 0;
   border: 0;
   background: transparent;
   color: #f5f8ff;
+  font-family: inherit;
   font-size: 1.05rem;
   font-weight: 600;
   letter-spacing: -0.01em;
-  appearance: none;
+  text-align: left;
   cursor: pointer;
   outline: none;
   transition: color 180ms ease, transform 180ms ease;
@@ -1937,17 +1942,65 @@ img {
   transform: translateX(0.04rem);
 }
 
-.title-season-selector::after {
-  content: "";
-  position: absolute;
-  top: calc(50% + 0.28rem);
-  right: 0.45rem;
+.title-season-select-chevron {
   width: 0.52rem;
   height: 0.52rem;
   border-right: 1.5px solid rgba(255, 255, 255, 0.6);
   border-bottom: 1.5px solid rgba(255, 255, 255, 0.6);
-  transform: translateY(-50%) rotate(45deg);
+  transform: translateY(-0.16rem) rotate(45deg);
   pointer-events: none;
+  transition: transform 180ms ease;
+}
+
+.title-season-select[aria-expanded="true"] .title-season-select-chevron {
+  transform: translateY(0.14rem) rotate(225deg);
+}
+
+.title-season-options {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  display: grid;
+  width: max-content;
+  min-width: min(17rem, calc(100vw - 3rem));
+  max-width: min(24rem, calc(100vw - 3rem));
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  gap: 0.38rem;
+  padding: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.8rem;
+  background: rgba(18, 22, 31, 0.98);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.32);
+}
+
+.title-season-options button {
+  width: 100%;
+  padding: 0.68rem 0.75rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: #b7c1d6;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.title-season-options button:hover,
+.title-season-options button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  outline: none;
+}
+
+.title-season-options button.is-selected {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
 }
 
 .title-season-divider {
