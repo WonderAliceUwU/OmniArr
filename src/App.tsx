@@ -337,9 +337,7 @@ function App() {
       } else {
         await api.requestSeries(card.tmdbId, currentJellyfinUser)
       }
-      if (route === 'calendar') {
-        await loadCalendar({ silent: true })
-      } else if (route !== 'downloads' && route !== 'settings' && route !== 'search') {
+      if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
         await loadHub(route as HubPageResponse['page'], { silent: true })
       }
       setNotice(`${card.title} sent to ${card.mediaType === 'movie' ? 'Radarr' : 'Sonarr'}.`)
@@ -568,7 +566,13 @@ function Sidebar(props: {
     <aside className="omniarr-sidebar">
       <div className="sidebar-wallpaper" />
       <div className="sidebar-inner">
-        <button className="sidebar-profile" onClick={() => startTransition(() => props.setRoute('home'))} type="button">
+        <button
+          aria-label="Switch user"
+          className="sidebar-profile"
+          disabled={props.busy}
+          onClick={props.onExitProfile}
+          type="button"
+        >
           <div className="sidebar-avatar">{props.currentUser.slice(0, 1).toUpperCase()}</div>
           <div className="sidebar-profile-copy">
             <strong>{props.currentUser}</strong>
@@ -625,16 +629,14 @@ function Sidebar(props: {
 
         <div className="sidebar-footer">
           <button className="ghost-button sidebar-settings" onClick={() => startTransition(() => props.setRoute('settings'))} type="button">
-            <span className="door-icon sidebar-action-icon" aria-hidden="true">S</span>
-            <span
-              className={hasServiceFailure ? 'status-dot down sidebar-settings-status' : 'status-dot ok sidebar-settings-status'}
-              title={hasServiceFailure ? 'One or more services are failing.' : 'All services are healthy.'}
-            />
+            <span className="sidebar-settings-icon" aria-hidden="true">
+              <SettingsGlyph />
+              <span
+                className={hasServiceFailure ? 'status-dot down sidebar-settings-status' : 'status-dot ok sidebar-settings-status'}
+                title={hasServiceFailure ? 'One or more services are failing.' : 'All services are healthy.'}
+              />
+            </span>
             <span>Settings</span>
-          </button>
-          <button className="ghost-button sidebar-exit" disabled={props.busy} onClick={props.onExitProfile} type="button">
-            <span className="door-icon sidebar-action-icon" aria-hidden="true">[]</span>
-            <span>Switch user</span>
           </button>
         </div>
       </div>
@@ -677,6 +679,15 @@ function LibraryGlyph() {
       <path d="M4.5 9.9H11.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
       <circle cx="10.9" cy="7.1" r="0.7" fill="currentColor" />
       <circle cx="8.8" cy="7.1" r="0.7" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SettingsGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <path d="M6.45 2.1H9.55L10 3.7C10.38 3.85 10.74 4.05 11.06 4.29L12.65 3.84L14.2 6.52L13.04 7.7C13.08 7.9 13.1 8.1 13.1 8.3C13.1 8.5 13.08 8.7 13.04 8.9L14.2 10.08L12.65 12.76L11.06 12.31C10.74 12.55 10.38 12.75 10 12.9L9.55 14.5H6.45L6 12.9C5.62 12.75 5.26 12.55 4.94 12.31L3.35 12.76L1.8 10.08L2.96 8.9C2.92 8.7 2.9 8.5 2.9 8.3C2.9 8.1 2.92 7.9 2.96 7.7L1.8 6.52L3.35 3.84L4.94 4.29C5.26 4.05 5.62 3.85 6 3.7L6.45 2.1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.25" />
+      <circle cx="8" cy="8.3" r="2.05" stroke="currentColor" strokeWidth="1.25" />
     </svg>
   )
 }
@@ -2613,116 +2624,6 @@ function SearchPage(props: {
           </div>
         </section>
       ) : null}
-    </div>
-  )
-}
-
-function CollapsibleSection(props: {
-  title: string
-  count: number
-  children: ReactNode
-}) {
-  const [isCollapsed, setIsCollapsed] = useState(false)
-
-  return (
-    <section className="downloads-section">
-      <button
-        className="downloads-section-header"
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        type="button"
-      >
-        <h2>{props.title} ({props.count})</h2>
-        <span className={isCollapsed ? 'collapse-arrow' : 'collapse-arrow expanded'}>
-          <svg viewBox="0 0 16 16" fill="none" >
-            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-      </button>
-      {!isCollapsed && <div className="downloads-grid">{props.children}</div>}
-    </section>
-  )
-}
-
-function ProcessingCard(props: {
-  item: ProcessingItem,
-  onCancel: (id: string) => void
-}) {
-  return (
-    <div className="download-card processing-card">
-      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
-      <div className="download-card-overlay" />
-      <div className="download-card-content">
-        <div className="download-card-spinner">
-          <div className="loading-orb" />
-        </div>
-        <div className="download-card-info">
-          <h3>{props.item.title}</h3>
-          <p>{props.item.subtitle}</p>
-          <p className="download-card-user">Requested by: {props.item.user}</p>
-        </div>
-        <button
-          className="download-card-cancel"
-          onClick={() => props.onCancel(props.item.id)}
-          type="button"
-        >
-          ×
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function DownloadingCard(props: {
-  item: DownloadItem,
-  onCancel: (id: string) => void
-}) {
-  return (
-    <div className="download-card downloading-card">
-      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
-      <div className="download-card-overlay" />
-      <div className="download-card-content">
-        <div className="download-card-info">
-          <h3>{props.item.title}</h3>
-          <p>{props.item.subtitle}</p>
-        </div>
-        <button
-          className="download-card-cancel"
-          onClick={() => props.onCancel(props.item.id)}
-          type="button"
-        >
-          ×
-        </button>
-      </div>
-      <div className="download-card-progress">
-        <div className="download-card-progress-bar" style={{ width: `${props.item.progress}%` }} />
-      </div>
-       <p className="download-card-details">{props.item.size} @ {props.item.eta}</p>
-    </div>
-  )
-}
-
-function CompletedCard(props: {
-  item: CompletedDownloadItem,
-  onDismiss: (id: string) => void
-}) {
-  return (
-    <div className="download-card completed-card">
-      {props.item.backdropUrl && <img src={props.item.backdropUrl} className="download-card-backdrop" alt="" />}
-      <div className="download-card-overlay" />
-      <div className="download-card-content">
-        <div className="download-card-info">
-          <h3>{props.item.title}</h3>
-          <p>{props.item.subtitle}</p>
-          <p className="download-card-completed-badge">Completed</p>
-        </div>
-        <button
-          className="download-card-cancel"
-          onClick={() => props.onDismiss(props.item.id)}
-          type="button"
-        >
-          ×
-        </button>
-      </div>
     </div>
   )
 }

@@ -17,7 +17,6 @@ import {
   getCalendar,
   getConnectionStatuses,
   getDashboard,
-  getDownloads,
   getHubPage,
   searchTitles,
   getTitleDetails,

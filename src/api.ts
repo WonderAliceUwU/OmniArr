@@ -4,7 +4,6 @@ import type {
   AuthResponse,
   CalendarResponse,
   DashboardResponse,
-  DownloadItem,
   DownloadsResponse,
   HubPageResponse,
   MediaCard,
