@@ -168,14 +168,12 @@ img {
   background: rgba(255, 255, 255, 0.16);
 }
 
-.sidebar-settings,
-.sidebar-exit {
+.sidebar-settings {
   background: transparent;
   box-shadow: none;
 }
 
-.sidebar-settings:hover,
-.sidebar-exit:hover {
+.sidebar-settings:hover {
   background: rgba(255, 255, 255, 0.12);
   box-shadow: -3px 6px 13px rgba(0, 0, 0, 0.2);
 }
@@ -191,8 +189,7 @@ img {
 
 .sidebar-profile-copy,
 .sidebar-link > span:last-child,
-.sidebar-settings > span:last-child,
-.sidebar-exit > span:last-child {
+.sidebar-settings > span:last-child {
   white-space: nowrap;
   opacity: 0;
   max-width: 0;
@@ -203,8 +200,7 @@ img {
 
 .reiverr-sidebar:hover .sidebar-profile-copy,
 .reiverr-sidebar:hover .sidebar-link > span:last-child,
-.reiverr-sidebar:hover .sidebar-settings > span:last-child,
-.reiverr-sidebar:hover .sidebar-exit > span:last-child {
+.reiverr-sidebar:hover .sidebar-settings > span:last-child {
   opacity: 1;
   max-width: 12rem;
   transform: translateX(0);
@@ -212,15 +208,13 @@ img {
 
 .reiverr-sidebar:hover .sidebar-profile,
 .reiverr-sidebar:hover .sidebar-link,
-.reiverr-sidebar:hover .sidebar-settings,
-.reiverr-sidebar:hover .sidebar-exit {
+.reiverr-sidebar:hover .sidebar-settings {
   justify-content: flex-start;
 }
 
 .reiverr-sidebar:hover .sidebar-profile,
 .reiverr-sidebar:hover .sidebar-link,
-.reiverr-sidebar:hover .sidebar-settings,
-.reiverr-sidebar:hover .sidebar-exit {
+.reiverr-sidebar:hover .sidebar-settings {
   width: 100%;
   min-width: 0;
   max-width: none;
@@ -229,8 +223,7 @@ img {
 
 .reiverr-sidebar:not(:hover) .sidebar-profile,
 .reiverr-sidebar:not(:hover) .sidebar-link,
-.reiverr-sidebar:not(:hover) .sidebar-settings,
-.reiverr-sidebar:not(:hover) .sidebar-exit {
+.reiverr-sidebar:not(:hover) .sidebar-settings {
   gap: 0;
   justify-content: center;
   padding-left: 0;
@@ -317,15 +310,13 @@ img {
   flex: 0 0 1.85rem;
 }
 
-.sidebar-settings,
-.sidebar-exit {
+.sidebar-settings {
   display: flex;
   align-items: center;
   gap: 0.8rem;
 }
 
-.sidebar-settings,
-.sidebar-exit {
+.sidebar-settings {
   width: 2.9rem;
   min-width: 2.9rem;
   max-width: 2.9rem;
@@ -334,32 +325,44 @@ img {
   padding: 0.525rem;
 }
 
-.reiverr-sidebar:hover .sidebar-settings,
-.reiverr-sidebar:hover .sidebar-exit {
+.reiverr-sidebar:hover .sidebar-settings {
   justify-content: flex-start;
 }
 
-.sidebar-settings-status {
-  width: 0.6rem;
-  height: 0.6rem;
-  margin-left: -0.4rem;
-  margin-right: 0.05rem;
-}
-
-.door-icon {
+.sidebar-settings-icon {
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: 2rem;
   height: 2rem;
   border-radius: 0.7rem;
   background: rgba(255, 255, 255, 0.1);
-  font-family: monospace;
-  letter-spacing: -0.12em;
+  color: #e8edf8;
   flex: 0 0 auto;
 }
 
-.sidebar-link-short,
-.sidebar-action-icon {
+.sidebar-settings-status {
+  position: absolute;
+  inset: -0.2rem;
+  width: auto;
+  height: auto;
+  border: 0.12rem solid currentColor;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.sidebar-settings-status.ok {
+  background: transparent;
+  color: #59df8a;
+}
+
+.sidebar-settings-status.down {
+  background: transparent;
+  color: #ff5d73;
+}
+
+.sidebar-link-short {
   display: inline-grid;
   place-items: center;
   width: 1.85rem;
@@ -404,8 +407,7 @@ img {
 }
 
 .reiverr-sidebar:not(:hover) .sidebar-link,
-.reiverr-sidebar:not(:hover) .sidebar-settings,
-.reiverr-sidebar:not(:hover) .sidebar-exit {
+.reiverr-sidebar:not(:hover) .sidebar-settings {
   background: transparent;
   box-shadow: none;
 }
@@ -1133,15 +1135,13 @@ img {
   font-weight: 700;
 }
 
-.sidebar-settings,
-.sidebar-exit {
+.sidebar-settings {
   margin-top: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.sidebar-settings:hover,
-.sidebar-exit:hover {
+.sidebar-settings:hover {
   background: rgba(255, 255, 255, 0.12);
   box-shadow: -3px 6px 13px rgba(0, 0, 0, 0.2);
 }
@@ -1177,8 +1177,7 @@ img {
   z-index: 1;
 }
 
-.reiverr-sidebar:not(:hover) .sidebar-settings,
-.reiverr-sidebar:not(:hover) .sidebar-exit {
+.reiverr-sidebar:not(:hover) .sidebar-settings {
   background: transparent;
   box-shadow: none;
 }
