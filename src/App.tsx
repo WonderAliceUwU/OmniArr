@@ -1323,6 +1323,7 @@ function TitleDetailsModal(props: {
   const [pendingEpisodeRequestIds, setPendingEpisodeRequestIds] = useState<string[]>([])
   const [pendingSeasonRequestIds, setPendingSeasonRequestIds] = useState<string[]>([])
   const [seasonActionBusy, setSeasonActionBusy] = useState<'download' | 'delete' | null>(null)
+  const [seasonMenuOpen, setSeasonMenuOpen] = useState(false)
   const [movieRequestPending, setMovieRequestPending] = useState(false)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
@@ -1334,10 +1335,13 @@ function TitleDetailsModal(props: {
   const closeTimeoutRef = useRef<number | null>(null)
   const modalRef = useRef<HTMLDivElement | null>(null)
   const episodeListRef = useRef<HTMLDivElement | null>(null)
+  const seasonMenuRef = useRef<HTMLDivElement | null>(null)
+  const seasonMenuOptionsRef = useRef<HTMLDivElement | null>(null)
   const pendingSeasonScrollRef = useRef<string | null>(null)
   const initialEpisodeFocusKeyRef = useRef('')
   const hasUserScrolledEpisodeListRef = useRef(false)
   const initialEpisodeListScrollLeftRef = useRef(0)
+  const seasonValue = activeSeasonId ?? details?.selectedSeasonId ?? ''
 
   useLayoutEffect(() => {
     if (!props.originRect || !modalRef.current) {
@@ -1389,6 +1393,7 @@ function TitleDetailsModal(props: {
     setPendingEpisodeRequestIds([])
     setPendingSeasonRequestIds([])
     setSeasonActionBusy(null)
+    setSeasonMenuOpen(false)
     setMovieRequestPending(false)
     setPlayerTarget(null)
     setIsOverviewExpanded(false)
@@ -1397,6 +1402,48 @@ function TitleDetailsModal(props: {
     hasUserScrolledEpisodeListRef.current = false
     initialEpisodeListScrollLeftRef.current = 0
   }, [props.card.id])
+
+  useEffect(() => {
+    if (!seasonMenuOpen) {
+      return
+    }
+
+    function closeSeasonMenuOnOutsidePress(event: PointerEvent) {
+      if (!seasonMenuRef.current?.contains(event.target as Node)) {
+        setSeasonMenuOpen(false)
+      }
+    }
+
+    function closeSeasonMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setSeasonMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', closeSeasonMenuOnOutsidePress)
+    window.addEventListener('keydown', closeSeasonMenuOnEscape)
+
+    return () => {
+      window.removeEventListener('pointerdown', closeSeasonMenuOnOutsidePress)
+      window.removeEventListener('keydown', closeSeasonMenuOnEscape)
+    }
+  }, [seasonMenuOpen])
+
+  useEffect(() => {
+    if (!seasonMenuOpen || !seasonMenuOptionsRef.current) {
+      return
+    }
+
+    const selectedOption = seasonMenuOptionsRef.current.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!selectedOption) {
+      return
+    }
+
+    seasonMenuOptionsRef.current.scrollTop = Math.max(
+      0,
+      selectedOption.offsetTop - (seasonMenuOptionsRef.current.clientHeight - selectedOption.offsetHeight) / 2
+    )
+  }, [seasonMenuOpen, seasonValue])
 
   function updateEpisodeInCaches(episodeId: string, updater: (episode: NonNullable<TitleDetailsResponse['episodes']>[number]) => NonNullable<TitleDetailsResponse['episodes']>[number]) {
     setDetails((current) => current && current.episodes.some((episode) => episode.id === episodeId)
@@ -1439,8 +1486,6 @@ function TitleDetailsModal(props: {
       cancelled = true
     }
   }, [props.card])
-
-  const seasonValue = activeSeasonId ?? details?.selectedSeasonId ?? ''
 
   useEffect(() => {
     const list = episodeListRef.current
@@ -1804,6 +1849,7 @@ function TitleDetailsModal(props: {
   function handleSeasonSelectChange(nextSeasonId: string) {
     pendingSeasonScrollRef.current = nextSeasonId || null
     setActiveSeasonId(nextSeasonId || undefined)
+    setSeasonMenuOpen(false)
   }
 
   function handleEpisodeWatchToggle(
@@ -2104,20 +2150,36 @@ function TitleDetailsModal(props: {
                           type="button"
                         />
                         {details.seasons.length ? (
-                          <label className="title-season-selector">
+                          <div className="title-season-selector" ref={seasonMenuRef}>
                             <span className="title-season-kicker">Season</span>
-                            <select
+                            <button
+                              aria-controls="title-season-options"
+                              aria-expanded={seasonMenuOpen}
+                              aria-haspopup="listbox"
                               className="title-season-select"
-                              onChange={(event) => handleSeasonSelectChange(event.target.value)}
-                              value={seasonValue}
+                              onClick={() => setSeasonMenuOpen((open) => !open)}
+                              type="button"
                             >
-                              {details.seasons.map((season) => (
-                                <option key={season.id} value={season.id}>
-                                  {season.title}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                              <span>{details.seasons.find((season) => season.id === seasonValue)?.title || 'Select season'}</span>
+                              <span aria-hidden="true" className="title-season-select-chevron" />
+                            </button>
+                            {seasonMenuOpen ? (
+                              <div aria-label="Seasons" className="title-season-options" id="title-season-options" ref={seasonMenuOptionsRef} role="listbox">
+                                {details.seasons.map((season) => (
+                                  <button
+                                    aria-selected={season.id === seasonValue}
+                                    className={season.id === seasonValue ? 'is-selected' : ''}
+                                    key={season.id}
+                                    onClick={() => handleSeasonSelectChange(season.id)}
+                                    role="option"
+                                    type="button"
+                                  >
+                                    {season.title}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
                         ) : null}
                         <div className="title-season-divider" aria-hidden="true" />
                         <div className="title-season-badge">
