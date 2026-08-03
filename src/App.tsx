@@ -679,7 +679,8 @@ function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   const value = bytes / (1024 ** unitIndex)
-  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`
+  const formattedValue = unitIndex === 0 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
+  return `${formattedValue} ${units[unitIndex]}`
 }
 
 function LoadingScreen() {

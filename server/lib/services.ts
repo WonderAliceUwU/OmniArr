@@ -443,8 +443,8 @@ export async function getServiceOptions(config: AppConfig): Promise<ServiceOptio
 
 export async function getMediaDiskSpace(config: AppConfig): Promise<DiskSpaceStatus | null> {
   const services = [
-    { baseUrl: config.radarr.baseUrl, apiKey: config.radarr.apiKey, rootFolderPath: config.radarr.rootFolderPath },
-    { baseUrl: config.sonarr.baseUrl, apiKey: config.sonarr.apiKey, rootFolderPath: config.sonarr.rootFolderPath }
+    { source: 'radarr' as const, baseUrl: config.radarr.baseUrl, apiKey: config.radarr.apiKey, rootFolderPath: config.radarr.rootFolderPath },
+    { source: 'sonarr' as const, baseUrl: config.sonarr.baseUrl, apiKey: config.sonarr.apiKey, rootFolderPath: config.sonarr.rootFolderPath }
   ];
 
   for (const service of services) {
@@ -453,18 +453,25 @@ export async function getMediaDiskSpace(config: AppConfig): Promise<DiskSpaceSta
     }
 
     try {
-      const folders = await fetchJson<Record<string, unknown>[]>(`${service.baseUrl}/api/v3/rootFolder`, {
+      const disks = await fetchJson<Record<string, unknown>[]>(`${service.baseUrl}/api/v3/diskspace`, {
         headers: { 'X-Api-Key': service.apiKey }
       });
-      const folder = folders.find((entry) => String(entry.path || '') === service.rootFolderPath) || folders[0];
-      const totalBytes = Number(folder?.totalSpace);
-      const availableBytes = Number(folder?.freeSpace);
+      const disk = selectDiskSpaceForRootFolder(disks, service.rootFolderPath);
+      if (!disk) {
+        console.warn(
+          `[Storage] ${service.source} did not report disk space for ${service.rootFolderPath}. Reported paths: ${disks.map((entry) => String(entry.path || '')).join(', ') || 'none'}`
+        );
+        continue;
+      }
+      const totalBytes = Number(disk?.totalSpace);
+      const availableBytes = Number(disk?.freeSpace);
 
       if (Number.isFinite(totalBytes) && totalBytes > 0 && Number.isFinite(availableBytes) && availableBytes >= 0) {
         return {
           totalBytes,
           availableBytes,
-          path: String(folder?.path || service.rootFolderPath)
+          path: String(disk?.path || service.rootFolderPath),
+          source: service.source
         };
       }
     } catch {
@@ -473,6 +480,32 @@ export async function getMediaDiskSpace(config: AppConfig): Promise<DiskSpaceSta
   }
 
   return null;
+}
+
+function selectDiskSpaceForRootFolder(
+  disks: Record<string, unknown>[],
+  rootFolderPath: string
+): Record<string, unknown> | undefined {
+  const normalizedRoot = rootFolderPath.replace(/\/+$/, '');
+  const matchingDisks = disks
+    .filter((disk) => {
+      const diskPath = String(disk.path || '').replace(/\/+$/, '');
+      return diskPath && (normalizedRoot === diskPath || normalizedRoot.startsWith(`${diskPath}/`));
+    })
+    .sort((left, right) => String(right.path || '').length - String(left.path || '').length);
+
+  if (matchingDisks[0]) {
+    return matchingDisks[0];
+  }
+
+  if (!normalizedRoot) {
+    return disks.find((disk) => {
+      const path = String(disk.path || '').replace(/\/+$/, '');
+      return path && path !== '/config';
+    });
+  }
+
+  return undefined;
 }
 
 export async function loadJellyfinUsers(baseUrl: string, apiKey: string): Promise<SelectOption[]> {

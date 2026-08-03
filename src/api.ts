@@ -84,7 +84,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
-  getDiskSpace: () => request<DiskSpaceStatus>('/api/storage'),
+  getDiskSpace: () => request<DiskSpaceStatus | null>('/api/storage'),
   getCalendar: (start: Date, end: Date) => request<CalendarResponse>(`/api/calendar?start=${start.toISOString()}&end=${end.toISOString()}`),
   getHub: (page: HubPageResponse['page']) => request<HubPageResponse>(`/api/hubs/${page}`),
   searchTitles: (query: string) => request<SearchResponse>(`/api/search?query=${encodeURIComponent(query)}`),

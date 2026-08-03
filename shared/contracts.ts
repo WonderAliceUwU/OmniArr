@@ -89,6 +89,7 @@ export interface DiskSpaceStatus {
   totalBytes: number;
   availableBytes: number;
   path?: string;
+  source: 'radarr' | 'sonarr';
 }
 
 export interface MediaCard {
