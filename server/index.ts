@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, statfs } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   defaultConfig,
@@ -7,6 +7,7 @@ import {
   type AuthPayload,
   type EpisodeRequestPayload,
   type EpisodeWatchStateRequest,
+  type DiskSpaceStatus,
   type SeasonDeletePayload,
   type SeasonRequestPayload,
   type TitleDetailsRequest
@@ -18,6 +19,7 @@ import {
   getConnectionStatuses,
   getDashboard,
   getHubPage,
+  getMediaDiskSpace,
   searchTitles,
   getTitleDetails,
   getTmdbLogos,
@@ -47,6 +49,8 @@ const SESSION_COOKIE = 'omniarr_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const sessions = new Map<string, SessionRecord>();
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
+const DATA_DIR = resolve(process.env.OMNIARR_DATA_DIR || resolve(process.cwd(), 'data'));
+const STORAGE_DIR = resolve(process.env.OMNIARR_STORAGE_PATH || DATA_DIR);
 
 const server = createServer(async (request, response) => {
   try {
@@ -211,6 +215,12 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
   if (url.pathname === '/api/dashboard' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
     sendJson(response, 200, await getDashboard(config));
+    return;
+  }
+
+  if (url.pathname === '/api/storage' && method === 'GET') {
+    const config = await readConfig(session!.encryptionKey);
+    sendJson(response, 200, await getDiskSpaceStatus(config));
     return;
   }
 
@@ -400,6 +410,28 @@ function createSession(encryptionKey: Buffer): string {
     expiresAt: Date.now() + SESSION_TTL_MS
   });
   return token;
+}
+
+async function getDiskSpaceStatus(config: AppConfig): Promise<DiskSpaceStatus> {
+  if (process.env.OMNIARR_STORAGE_PATH) {
+    return getFilesystemDiskSpace(STORAGE_DIR);
+  }
+
+  const mediaDiskSpace = await getMediaDiskSpace(config);
+  if (mediaDiskSpace) {
+    return mediaDiskSpace;
+  }
+
+  return getFilesystemDiskSpace(DATA_DIR);
+}
+
+async function getFilesystemDiskSpace(path: string): Promise<DiskSpaceStatus> {
+  const stats = await statfs(path);
+  return {
+    totalBytes: Number(stats.bsize) * Number(stats.blocks),
+    availableBytes: Number(stats.bsize) * Number(stats.bavail),
+    path
+  };
 }
 
 function getSession(request: IncomingMessage): SessionRecord | null {

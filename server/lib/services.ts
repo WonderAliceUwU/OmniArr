@@ -5,6 +5,7 @@ import type {
   CompletedDownloadItem,
   ConnectionStatus,
   DashboardResponse,
+  DiskSpaceStatus,
   DownloadItem,
   DownloadsResponse,
   EpisodeRequestPayload,
@@ -438,6 +439,40 @@ export async function getServiceOptions(config: AppConfig): Promise<ServiceOptio
     radarrRootFolders,
     radarrQualityProfiles
   };
+}
+
+export async function getMediaDiskSpace(config: AppConfig): Promise<DiskSpaceStatus | null> {
+  const services = [
+    { baseUrl: config.radarr.baseUrl, apiKey: config.radarr.apiKey, rootFolderPath: config.radarr.rootFolderPath },
+    { baseUrl: config.sonarr.baseUrl, apiKey: config.sonarr.apiKey, rootFolderPath: config.sonarr.rootFolderPath }
+  ];
+
+  for (const service of services) {
+    if (!service.baseUrl || !service.apiKey) {
+      continue;
+    }
+
+    try {
+      const folders = await fetchJson<Record<string, unknown>[]>(`${service.baseUrl}/api/v3/rootFolder`, {
+        headers: { 'X-Api-Key': service.apiKey }
+      });
+      const folder = folders.find((entry) => String(entry.path || '') === service.rootFolderPath) || folders[0];
+      const totalBytes = Number(folder?.totalSpace);
+      const availableBytes = Number(folder?.freeSpace);
+
+      if (Number.isFinite(totalBytes) && totalBytes > 0 && Number.isFinite(availableBytes) && availableBytes >= 0) {
+        return {
+          totalBytes,
+          availableBytes,
+          path: String(folder?.path || service.rootFolderPath)
+        };
+      }
+    } catch {
+      // The local data volume remains a useful fallback when an *arr service is unavailable.
+    }
+  }
+
+  return null;
 }
 
 export async function loadJellyfinUsers(baseUrl: string, apiKey: string): Promise<SelectOption[]> {
