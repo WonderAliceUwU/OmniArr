@@ -13,8 +13,6 @@ services:
     environment:
       PORT: "8787"
       OMNIARR_DATA_DIR: /app/data
-      OMNIARR_STORAGE_PATH: /media
       TMDB_BEARER_TOKEN: ""
     volumes:
       - ./data:/app/data
-      - ./media:/media:ro

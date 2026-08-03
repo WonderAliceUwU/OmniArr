@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, statfs } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   defaultConfig,
@@ -49,8 +49,6 @@ const SESSION_COOKIE = 'omniarr_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const sessions = new Map<string, SessionRecord>();
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
-const DATA_DIR = resolve(process.env.OMNIARR_DATA_DIR || resolve(process.cwd(), 'data'));
-const STORAGE_DIR = resolve(process.env.OMNIARR_STORAGE_PATH || DATA_DIR);
 
 const server = createServer(async (request, response) => {
   try {
@@ -412,26 +410,8 @@ function createSession(encryptionKey: Buffer): string {
   return token;
 }
 
-async function getDiskSpaceStatus(config: AppConfig): Promise<DiskSpaceStatus> {
-  if (process.env.OMNIARR_STORAGE_PATH) {
-    return getFilesystemDiskSpace(STORAGE_DIR);
-  }
-
-  const mediaDiskSpace = await getMediaDiskSpace(config);
-  if (mediaDiskSpace) {
-    return mediaDiskSpace;
-  }
-
-  return getFilesystemDiskSpace(DATA_DIR);
-}
-
-async function getFilesystemDiskSpace(path: string): Promise<DiskSpaceStatus> {
-  const stats = await statfs(path);
-  return {
-    totalBytes: Number(stats.bsize) * Number(stats.blocks),
-    availableBytes: Number(stats.bsize) * Number(stats.bavail),
-    path
-  };
+async function getDiskSpaceStatus(config: AppConfig): Promise<DiskSpaceStatus | null> {
+  return getMediaDiskSpace(config);
 }
 
 function getSession(request: IncomingMessage): SessionRecord | null {
