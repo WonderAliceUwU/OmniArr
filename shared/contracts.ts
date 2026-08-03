@@ -85,6 +85,12 @@ export interface ConnectionStatus {
   message: string;
 }
 
+export interface DiskSpaceStatus {
+  totalBytes: number;
+  availableBytes: number;
+  path?: string;
+}
+
 export interface MediaCard {
   id: string;
   tmdbId?: number;

@@ -19,6 +19,7 @@ import {
   type ConnectionStatus,
   type CompletedDownloadItem,
   type DownloadItem,
+  type DiskSpaceStatus,
   type HubPageResponse,
   type MediaCard,
   type ProcessingItem,
@@ -86,6 +87,7 @@ function App() {
   const [processingItems, setProcessingItems] = useState<ProcessingItem[]>([])
   const [completedDownloads, setCompletedDownloads] = useState<CompletedDownloadItem[]>([])
   const [connections, setConnections] = useState<ConnectionStatus[]>([])
+  const [diskSpace, setDiskSpace] = useState<DiskSpaceStatus | null>(null)
   const [hubPages, setHubPages] = useState<Partial<Record<HubPageResponse['page'], HubPageResponse>>>({})
   const [hubLoading, setHubLoading] = useState(false)
 
@@ -120,10 +122,11 @@ function App() {
   }
 
   async function refreshBaseData() {
-    const [settings, serviceOptions, dashboard] = await Promise.all([
+    const [settings, serviceOptions, dashboard, storage] = await Promise.all([
       api.getSettings(),
       api.getOptions(),
       api.getDashboard(),
+      api.getDiskSpace(),
     ])
 
     setConfig(settings)
@@ -132,6 +135,7 @@ function App() {
     setProcessingItems(dashboard.processing || [])
     setCompletedDownloads(dashboard.completedDownloads || [])
     setConnections(dashboard.connections)
+    setDiskSpace(storage)
     setEntryStage(resolveEntryStage(settings, serviceOptions))
   }
 
@@ -477,6 +481,7 @@ function App() {
         busy={busy}
         connections={connections}
         currentUser={currentJellyfinUser}
+        diskSpace={diskSpace}
         onExitProfile={() => void transitionEntryStage('profiles')}
         route={route}
         setRoute={setRoute}
@@ -556,6 +561,7 @@ function Sidebar(props: {
   route: AppRoute
   setRoute: (route: AppRoute) => void
   currentUser: string
+  diskSpace: DiskSpaceStatus | null
   connections: ConnectionStatus[]
   busy: boolean
   onExitProfile: () => void
@@ -628,6 +634,7 @@ function Sidebar(props: {
         </div>
 
         <div className="sidebar-footer">
+          {props.diskSpace ? <DiskSpaceIndicator diskSpace={props.diskSpace} /> : null}
           <button className="ghost-button sidebar-settings" onClick={() => startTransition(() => props.setRoute('settings'))} type="button">
             <span className="sidebar-settings-icon" aria-hidden="true">
               <SettingsGlyph />
@@ -642,6 +649,37 @@ function Sidebar(props: {
       </div>
     </aside>
   )
+}
+
+function DiskSpaceIndicator({ diskSpace }: { diskSpace: DiskSpaceStatus }) {
+  const availablePercentage = diskSpace.totalBytes > 0
+    ? Math.max(0, Math.min(100, (diskSpace.availableBytes / diskSpace.totalBytes) * 100))
+    : 0
+
+  return (
+    <div className="sidebar-disk" title={`${formatBytes(diskSpace.availableBytes)} free of ${formatBytes(diskSpace.totalBytes)}${diskSpace.path ? ` (${diskSpace.path})` : ''}`}>
+      <span className="sidebar-disk-ring" style={{ '--disk-progress': `${availablePercentage}%` } as CSSProperties}>
+        <span className="sidebar-disk-icon" aria-hidden="true">
+          <DiskGlyph />
+        </span>
+      </span>
+      <span className="sidebar-disk-copy">
+        <strong>Disk space</strong>
+        <span>{formatBytes(diskSpace.availableBytes)} free</span>
+      </span>
+    </div>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / (1024 ** unitIndex)
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`
 }
 
 function LoadingScreen() {
@@ -688,6 +726,16 @@ function SettingsGlyph() {
     <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
       <path d="M6.45 2.1H9.55L10 3.7C10.38 3.85 10.74 4.05 11.06 4.29L12.65 3.84L14.2 6.52L13.04 7.7C13.08 7.9 13.1 8.1 13.1 8.3C13.1 8.5 13.08 8.7 13.04 8.9L14.2 10.08L12.65 12.76L11.06 12.31C10.74 12.55 10.38 12.75 10 12.9L9.55 14.5H6.45L6 12.9C5.62 12.75 5.26 12.55 4.94 12.31L3.35 12.76L1.8 10.08L2.96 8.9C2.92 8.7 2.9 8.5 2.9 8.3C2.9 8.1 2.92 7.9 2.96 7.7L1.8 6.52L3.35 3.84L4.94 4.29C5.26 4.05 5.62 3.85 6 3.7L6.45 2.1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.25" />
       <circle cx="8" cy="8.3" r="2.05" stroke="currentColor" strokeWidth="1.25" />
+    </svg>
+  )
+}
+
+function DiskGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <rect x="2.4" y="3" width="11.2" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4.8 6H11.2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+      <circle cx="10.9" cy="9.5" r="0.8" fill="currentColor" />
     </svg>
   )
 }
