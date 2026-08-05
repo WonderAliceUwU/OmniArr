@@ -132,6 +132,7 @@ interface JellyfinItem {
   };
   SeriesId?: string;
   SeriesName?: string;
+  SeriesPrimaryImageTag?: string;
   ParentIndexNumber?: number;
   IndexNumber?: number;
   ParentBackdropItemId?: string;
@@ -2801,8 +2802,8 @@ async function getLibrarySnapshot(config: AppConfig): Promise<{
 
   try {
     [resume, nextUp, allItems] = await Promise.all([
-      jellyfinFetch<JellyfinItem[]>(config, `/Users/${config.jellyfin.userId}/Items/Resume?mediaTypes=Video&enableUserData=true&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
-      jellyfinFetch<JellyfinItem[]>(config, `/Shows/NextUp?userId=${config.jellyfin.userId}&enableUserData=true&fields=ProviderIds,Overview,SeriesId,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
+      jellyfinFetch<JellyfinItem[]>(config, `/Users/${config.jellyfin.userId}/Items/Resume?mediaTypes=Video&enableUserData=true&fields=ProviderIds,Overview,SeriesId,SeriesPrimaryImageTag,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
+      jellyfinFetch<JellyfinItem[]>(config, `/Shows/NextUp?userId=${config.jellyfin.userId}&enableUserData=true&fields=ProviderIds,Overview,SeriesId,SeriesPrimaryImageTag,ParentBackdropItemId,ParentBackdropImageTags,RunTimeTicks,ParentIndexNumber,IndexNumber,UserData`),
       jellyfinFetch<JellyfinItem[]>(
         config,
         `/Users/${config.jellyfin.userId}/Items?recursive=true&includeItemTypes=Movie,Series&fields=ProviderIds,DateCreated,DateLastMediaAdded,Overview,ImageTags,BackdropImageTags,ProductionYear`
@@ -3770,7 +3771,10 @@ function jellyfinToCard(
     return null;
   }
 
-  const posterTag = item.ImageTags?.Primary || '';
+  const posterItemId = item.Type === 'Episode' && item.SeriesId ? item.SeriesId : item.Id;
+  const posterTag = item.Type === 'Episode'
+    ? item.SeriesPrimaryImageTag || item.ImageTags?.Primary || ''
+    : item.ImageTags?.Primary || '';
   const backdropItemId = item.ParentBackdropItemId || item.Id;
   const backdropTag = item.ParentBackdropImageTags?.[0] || item.BackdropImageTags?.[0] || posterTag;
   const progress = Math.round(item.UserData?.PlayedPercentage || 0);
@@ -3789,7 +3793,7 @@ function jellyfinToCard(
         : item.Type || 'Library',
     overview: item.Overview || '',
     mediaType: item.Type === 'Movie' ? 'movie' : item.Type === 'Episode' ? 'episode' : 'series',
-    posterUrl: `/api/assets/jellyfin/${item.Id}?kind=Primary&maxWidth=480&tag=${encodeURIComponent(posterTag)}`,
+    posterUrl: `/api/assets/jellyfin/${posterItemId}?kind=Primary&maxWidth=480&tag=${encodeURIComponent(posterTag)}`,
     backdropUrl: `/api/assets/jellyfin/${backdropItemId}?kind=Backdrop&maxWidth=1920&tag=${encodeURIComponent(backdropTag)}`,
     badge: item.Type || 'Jellyfin',
     progress: progress > 0 ? progress : undefined,
