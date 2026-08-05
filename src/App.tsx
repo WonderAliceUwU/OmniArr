@@ -566,31 +566,69 @@ function Sidebar(props: {
   busy: boolean
   onExitProfile: () => void
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
   const hasServiceFailure = props.connections.some((connection) => !connection.ok)
 
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [])
+
+  function navigate(route: AppRoute) {
+    setMenuOpen(false)
+    startTransition(() => props.setRoute(route))
+  }
+
   return (
-    <aside className="omniarr-sidebar">
-      <div className="sidebar-wallpaper" />
-      <div className="sidebar-inner">
-        <button
-          aria-label="Switch user"
-          className="sidebar-profile"
-          disabled={props.busy}
-          onClick={props.onExitProfile}
-          type="button"
-        >
-          <div className="sidebar-avatar">{props.currentUser.slice(0, 1).toUpperCase()}</div>
-          <div className="sidebar-profile-copy">
-            <strong>{props.currentUser}</strong>
-          </div>
-        </button>
+    <>
+      <button
+        aria-controls="main-navigation"
+        aria-expanded={menuOpen}
+        aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+        className="mobile-menu-toggle"
+        onClick={() => setMenuOpen((open) => !open)}
+        type="button"
+      >
+        <span aria-hidden="true" />
+        <span aria-hidden="true" />
+        <span aria-hidden="true" />
+      </button>
+
+      <aside className={menuOpen ? 'omniarr-sidebar is-open' : 'omniarr-sidebar'} id="main-navigation">
+        <div className="sidebar-wallpaper" />
+        <div className="sidebar-inner">
+          <button aria-label="Close navigation menu" className="mobile-menu-close" onClick={() => setMenuOpen(false)} type="button">
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Switch user"
+            className="sidebar-profile"
+            disabled={props.busy}
+            onClick={() => {
+              setMenuOpen(false)
+              props.onExitProfile()
+            }}
+            type="button"
+          >
+            <div className="sidebar-avatar">{props.currentUser.slice(0, 1).toUpperCase()}</div>
+            <div className="sidebar-profile-copy">
+              <strong>{props.currentUser}</strong>
+            </div>
+          </button>
 
         <div className="sidebar-links">
           {topSidebarItems.map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
-              onClick={() => startTransition(() => props.setRoute(item.route))}
+              onClick={() => navigate(item.route)}
               type="button"
             >
               <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
@@ -606,7 +644,7 @@ function Sidebar(props: {
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
-              onClick={() => startTransition(() => props.setRoute(item.route))}
+              onClick={() => navigate(item.route)}
               type="button"
             >
               <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
@@ -622,7 +660,7 @@ function Sidebar(props: {
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
-              onClick={() => startTransition(() => props.setRoute(item.route))}
+              onClick={() => navigate(item.route)}
               type="button"
             >
               <span className="sidebar-link-short sidebar-network-icon" aria-hidden="true">
@@ -635,7 +673,7 @@ function Sidebar(props: {
 
         <div className="sidebar-footer">
           {props.diskSpace ? <DiskSpaceIndicator diskSpace={props.diskSpace} /> : null}
-          <button className="ghost-button sidebar-settings" onClick={() => startTransition(() => props.setRoute('settings'))} type="button">
+          <button className="ghost-button sidebar-settings" onClick={() => navigate('settings')} type="button">
             <span className="sidebar-settings-icon" aria-hidden="true">
               <SettingsGlyph />
               <span
@@ -646,19 +684,20 @@ function Sidebar(props: {
             <span>Settings</span>
           </button>
         </div>
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   )
 }
 
 function DiskSpaceIndicator({ diskSpace }: { diskSpace: DiskSpaceStatus }) {
-  const availablePercentage = diskSpace.totalBytes > 0
-    ? Math.max(0, Math.min(100, (diskSpace.availableBytes / diskSpace.totalBytes) * 100))
+  const usedPercentage = diskSpace.totalBytes > 0
+    ? Math.max(0, Math.min(100, ((diskSpace.totalBytes - diskSpace.availableBytes) / diskSpace.totalBytes) * 100))
     : 0
 
   return (
     <div className="sidebar-disk" title={`${formatBytes(diskSpace.availableBytes)} free of ${formatBytes(diskSpace.totalBytes)}${diskSpace.path ? ` (${diskSpace.path})` : ''}`}>
-      <span className="sidebar-disk-ring" style={{ '--disk-progress': `${availablePercentage}%` } as CSSProperties}>
+      <span className="sidebar-disk-ring" style={{ '--disk-progress': `${usedPercentage}%` } as CSSProperties}>
         <span className="sidebar-disk-icon" aria-hidden="true">
           <DiskGlyph />
         </span>
@@ -1347,7 +1386,12 @@ function MediaTile(props: {
         }}
         type="button"
       >
-        {imageUrl ? <img alt={props.card.title} loading="lazy" src={imageUrl} /> : <div className="media-fallback" />}
+        {imageUrl ? (
+          <picture>
+            {props.styleType === 'landscape' || props.styleType === 'episode' ? <source media="(max-width: 980px)" srcSet={props.card.posterUrl || imageUrl} /> : null}
+            <img alt={props.card.title} loading="lazy" src={imageUrl} />
+          </picture>
+        ) : <div className="media-fallback" />}
         {showLandscapeLogo ? (
           <div className="media-landscape-logo-wrap">
             <img alt="" className="media-landscape-logo" loading="lazy" src={props.card.logoUrl} />
@@ -1677,7 +1721,7 @@ function TitleDetailsModal(props: {
     || props.card.firstAirDate?.slice(0, 4)
     || displaySubtitle.match(/\b(19|20)\d{2}\b/)?.[0]
     || ''
-  const truncatedOverview = truncateOverview(displayOverview, 260)
+  const truncatedOverview = truncateOverview(displayOverview, window.matchMedia('(max-width: 980px)').matches ? 150 : 260)
   const shouldShowOverviewToggle = truncatedOverview !== displayOverview
   const jellyfinPlayerUrl = playerTarget && props.config.jellyfin.baseUrl
     ? buildJellyfinPlayerUrl(props.config.jellyfin.baseUrl, playerTarget.id)
@@ -2175,6 +2219,12 @@ function TitleDetailsModal(props: {
                       <h2 className="title-details-title">{displayTitle}</h2>
                     )}
                   </div>
+                  {canPlay ? (
+                    <ActionButton className="title-mobile-summary-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
+                      <PlayGlyph />
+                      <span>Play</span>
+                    </ActionButton>
+                  ) : null}
                   <div className="title-details-summary-content">
                     <p className="title-details-overview">
                       {isOverviewExpanded ? displayOverview : truncatedOverview}
@@ -2193,7 +2243,7 @@ function TitleDetailsModal(props: {
                     </p>
                     <div className="title-details-summary-header">
                       {canPlay && details?.mediaType !== 'series' ? (
-                        <ActionButton onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
+                        <ActionButton className="title-summary-header-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
                           <PlayGlyph />
                           <span>Play</span>
                         </ActionButton>
@@ -2250,6 +2300,16 @@ function TitleDetailsModal(props: {
                         {details.seasons.length ? (
                           <div className="title-season-selector" ref={seasonMenuRef}>
                             <span className="title-season-kicker">Season</span>
+                            <select
+                              aria-label="Season"
+                              className="mobile-season-select"
+                              onChange={(event) => handleSeasonSelectChange(event.target.value)}
+                              value={seasonValue}
+                            >
+                              {details.seasons.map((season) => (
+                                <option key={season.id} value={season.id}>{season.title}</option>
+                              ))}
+                            </select>
                             <button
                               aria-controls="title-season-options"
                               aria-expanded={seasonMenuOpen}

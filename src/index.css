@@ -116,6 +116,11 @@ img {
   width: 15rem;
 }
 
+.mobile-menu-toggle,
+.mobile-menu-close {
+  display: none;
+}
+
 .sidebar-wallpaper {
   position: absolute;
   inset: 1rem;
@@ -832,7 +837,7 @@ img {
 }
 
 .carousel-section.has-left-nav .carousel-track {
-  padding-left: 4.1rem;
+  padding-left: 1.5rem;
 }
 
 .carousel-track::-webkit-scrollbar {
@@ -1188,6 +1193,12 @@ img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.media-art picture {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .network .media-art img {
@@ -2009,6 +2020,11 @@ img {
   color: #eef3ff;
 }
 
+.mobile-season-select,
+.title-mobile-summary-play {
+  display: none;
+}
+
 .title-season-kicker {
   color: #72809c;
   font-size: 0.68rem;
@@ -2380,12 +2396,18 @@ img {
 .episode-card-art {
   position: relative;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.95rem;
   aspect-ratio: 16 / 9;
   background: rgba(255, 255, 255, 0.06);
   box-shadow:
     0 0.8rem 1.8rem rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.episode-card:hover .episode-card-art,
+.episode-card:focus-visible .episode-card-art {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .episode-card-art::before {
@@ -3593,12 +3615,282 @@ img {
     padding: 0;
   }
 
+  .modal-backdrop {
+    place-items: stretch;
+    padding: 0;
+  }
+
   .content-panel {
     border-radius: 0;
   }
 
-  .omniarr-sidebar {
+  .hero-showcase {
+    height: min(31rem, 64svh);
+    min-height: 23rem;
+    aspect-ratio: auto;
+    gap: 0;
+    padding: 0 1rem;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .hero-logo {
+    font-size: clamp(2rem, 8vw, 3.25rem);
+    text-align: center;
+  }
+
+  .hero-logo-image {
+    max-width: min(22rem, 82vw);
+    max-height: 8rem;
+    margin: 0;
+    object-position: center;
+  }
+
+  .hero-overlay {
+    background:
+      linear-gradient(180deg, rgba(7, 9, 14, 0.1) 0%, rgba(7, 9, 14, 0.16) 34%, rgba(7, 9, 14, 0.58) 66%, #000 100%);
+  }
+
+  .hero-content {
+    justify-items: center;
+    align-content: center;
+    text-align: center;
+  }
+
+  .hero-copy {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .hero-copy::before {
     display: none;
+  }
+
+  .hero-copy h1 {
+    margin: 0.2rem 0 0.45rem;
+    font-size: clamp(1.4rem, 5vw, 2rem);
+  }
+
+  .hero-copy p {
+    font-size: 0.85rem;
+    line-height: 1.35;
+  }
+
+  .hero-dots {
+    display: none;
+  }
+
+  .carousel-row {
+    gap: 0.65rem;
+  }
+
+  .carousel-section {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .carousel-title {
+    padding: 0 0.9rem;
+    font-size: 1.1rem;
+  }
+
+  .carousel-track {
+    gap: 0.65rem;
+    padding: 0.4rem 0.9rem;
+  }
+
+  .carousel-section.has-left-nav .carousel-track {
+    padding-left: 0.9rem;
+  }
+
+  .carousel-nav,
+  .episode-dock-arrow {
+    display: none;
+  }
+
+  .carousel-section::before,
+  .carousel-section::after,
+  .episode-dock::before,
+  .episode-dock::after {
+    display: none;
+  }
+
+  .mobile-menu-toggle {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 40;
+    display: grid;
+    gap: 0.28rem;
+    width: 2.9rem;
+    height: 2.9rem;
+    padding: 0.7rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0.9rem;
+    background: rgba(10, 12, 16, 0.86);
+    box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(12px);
+  }
+
+  .mobile-menu-toggle span {
+    display: block;
+    height: 2px;
+    border-radius: 999px;
+    background: #f5f7fb;
+  }
+
+  .omniarr-sidebar {
+    display: block;
+    width: 100%;
+    padding: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-0.75rem);
+    transition: opacity 180ms ease, transform 180ms ease, visibility 180ms step-end;
+    filter: none;
+  }
+
+  .omniarr-sidebar:hover {
+    width: 100%;
+  }
+
+  .omniarr-sidebar.is-open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  .omniarr-sidebar .sidebar-wallpaper {
+    inset: 0;
+    border-radius: 0;
+  }
+
+  .sidebar-inner {
+    gap: 0.75rem;
+    overflow-y: auto;
+    padding: 5.4rem 1.25rem 1.25rem;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .mobile-menu-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: block;
+    width: 2.9rem;
+    height: 2.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-menu-close span {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1rem;
+    height: 2px;
+    border-radius: 999px;
+    background: #f5f7fb;
+  }
+
+  .mobile-menu-close span:first-child {
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+
+  .mobile-menu-close span:last-child {
+    transform: translate(-50%, -50%) rotate(-45deg);
+  }
+
+  .sidebar-profile,
+  .sidebar-link,
+  .omniarr-sidebar:not(:hover) .sidebar-profile,
+  .omniarr-sidebar:not(:hover) .sidebar-link,
+  .omniarr-sidebar:not(:hover) .sidebar-settings {
+    gap: 0.85rem;
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 0.8rem;
+  }
+
+  .sidebar-profile-copy,
+  .sidebar-link > span:last-child,
+  .sidebar-settings > span:last-child,
+  .omniarr-sidebar:not(:hover) .sidebar-profile-copy,
+  .omniarr-sidebar:not(:hover) .sidebar-link > span:last-child,
+  .omniarr-sidebar:not(:hover) .sidebar-settings > span:last-child {
+    width: auto;
+    opacity: 1;
+    transform: none;
+  }
+
+  .sidebar-links {
+    gap: 0.35rem;
+  }
+
+  .sidebar-footer {
+    margin-top: auto;
+  }
+
+  .sidebar-disk,
+  .omniarr-sidebar:not(:hover) .sidebar-disk {
+    justify-content: flex-start;
+    width: 100%;
+    padding: 0.8rem;
+  }
+
+  .sidebar-disk-copy,
+  .omniarr-sidebar:not(:hover) .sidebar-disk-copy {
+    width: auto;
+    opacity: 1;
+    transform: none;
+  }
+
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-profile-copy,
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-link > span:last-child,
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-settings > span:last-child,
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-disk-copy {
+    display: grid;
+    max-width: none;
+    overflow: visible;
+    opacity: 1;
+    transform: none;
+  }
+
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-link.active {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    justify-self: stretch;
+    align-self: stretch;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: -3px 6px 13px rgba(0, 0, 0, 0.25);
+  }
+
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-link.active::before {
+    display: none;
+  }
+
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-footer > .sidebar-disk,
+  .omniarr-sidebar.is-open:not(:hover) .sidebar-footer > .sidebar-settings {
+    gap: 0.8rem;
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 0.8rem;
   }
 
   .auth-layout,
@@ -3619,12 +3911,200 @@ img {
   }
 
   .title-details-hero-heading {
-    left: 0.95rem;
+    left: auto;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    text-align: center;
+  }
+
+  .title-details-hero {
+    height: 28rem;
+    background-position: center center;
+  }
+
+  .title-details-darken {
+    background: linear-gradient(180deg, rgba(9, 11, 16, 0.04) 0%, rgba(9, 11, 16, 0.18) 36%, #090b10 94%);
+  }
+
+  .title-details-logo {
+    margin-inline: auto;
+    max-width: min(21rem, 82vw);
+    max-height: 7rem;
+    object-position: center;
+  }
+
+  .title-details-body {
+    display: block;
+    min-height: auto;
+    overflow: visible;
+    padding-bottom: 1rem;
+  }
+
+  .title-details-body .title-details-shell {
+    min-height: 0;
+    padding-top: 16rem;
+  }
+
+  .title-details-summary {
+    width: 100%;
+    min-width: 0;
+    gap: 0.55rem;
+    padding-bottom: 1rem;
+    text-align: center;
+  }
+
+  .title-mobile-summary-play {
+    display: inline-flex;
+    justify-self: center;
+    margin-top: 0.1rem;
+  }
+
+  .title-summary-header-play,
+  .title-season-play-button {
+    display: none;
+  }
+
+  .title-details-summary-content {
+    grid-template-columns: 1fr;
+    width: 100%;
+    min-width: 0;
+    justify-items: center;
+    gap: 0.7rem;
+  }
+
+  .title-details-summary-copy {
+    gap: 0.55rem;
+  }
+
+  .title-details-summary-header {
+    justify-content: center;
+  }
+
+  .title-details-overview {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .title-details-year {
+    display: none;
+  }
+
+  .title-seasons-panel {
+    gap: 0.65rem;
+  }
+
+  .title-seasons-header {
+    padding-top: 0;
+  }
+
+  .episode-list {
+    gap: 0.65rem;
+    padding: 0.65rem 0 0.8rem;
+  }
+
+  .episode-card {
+    width: min(13rem, 62vw);
+  }
+
+  .episode-card-copy {
+    padding-top: 0.45rem;
+  }
+
+  .episode-card-copy strong {
+    font-size: 0.76rem;
+  }
+
+  .episode-card-copy span {
+    font-size: 0.65rem;
+  }
+
+  .title-cast-shell {
+    padding: 0 1rem 1rem;
+  }
+
+  .title-cast-list {
+    gap: 0.65rem;
+    padding-bottom: 0.2rem;
+  }
+
+  .cast-card {
+    flex-basis: 5.25rem;
+    gap: 0.4rem;
+  }
+
+  .cast-card-art {
+    width: 4.5rem;
+  }
+
+  .cast-card-copy strong {
+    font-size: 0.7rem;
+  }
+
+  .cast-card-copy span {
+    font-size: 0.6rem;
   }
 
   .title-details-modal {
-    width: min(100%, calc(100vw - 2rem));
-    height: min(calc(100vh - 2rem), 42rem);
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .title-details-modal-content,
+  .title-details-body,
+  .title-details-shell,
+  .title-details-primary,
+  .title-details-summary,
+  .title-seasons-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .title-details-modal-content {
+    overflow-x: clip;
+  }
+
+  .title-details-overview,
+  .title-details-title {
+    overflow-wrap: anywhere;
+  }
+
+  .title-details-modal-transition.is-open {
+    border-radius: 0;
+  }
+
+  .title-details-modal-content.has-embedded-player {
+    display: block;
+  }
+
+  .title-details-modal-content.has-embedded-player .title-details-body {
+    display: none;
+  }
+
+  .title-embedded-player {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 100dvh;
+    margin-top: 0;
+    padding: 0;
+  }
+
+  .title-player-topbar-embedded {
+    padding: 0.9rem 1rem;
+  }
+
+  .title-player-frame-shell {
+    height: 100%;
+    aspect-ratio: auto;
+    border-radius: 0;
   }
 
   .title-details-shell {
@@ -3637,7 +4117,7 @@ img {
   }
 
   .title-details-body .title-details-shell {
-    padding-top: 9rem;
+    padding-top: 16rem;
   }
 
   .title-details-summary-content {
@@ -3645,7 +4125,7 @@ img {
   }
 
   .title-details-summary-header {
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .title-seasons-header {
@@ -3653,17 +4133,48 @@ img {
   }
 
   .title-season-strip {
-    flex-wrap: wrap;
-    row-gap: 0.75rem;
+    flex-wrap: nowrap;
+    gap: 0.55rem;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+    scrollbar-width: none;
+  }
+
+  .title-season-strip::-webkit-scrollbar {
+    display: none;
   }
 
   .title-season-selector {
+    width: auto;
+    min-width: 0;
+    flex: 1 0 7.5rem;
+  }
+
+  .title-season-kicker,
+  .title-season-select,
+  .title-season-options {
+    display: none;
+  }
+
+  .mobile-season-select {
+    display: block;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 2.25rem;
+    overflow: hidden;
+    color: #f5f8ff;
+    font: inherit;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .title-season-select,
   .title-season-badge {
-    width: 100%;
+    width: auto;
   }
 
   .title-season-divider {
@@ -3671,7 +4182,16 @@ img {
   }
 
   .title-season-badge {
-    padding-left: 2.15rem;
+    flex: 0 0 auto;
+    padding-left: 0;
+  }
+
+  .title-season-actions {
+    flex: 0 0 auto;
+  }
+
+  .title-season-strip-spacer {
+    display: none;
   }
 
   .episode-dock::before,
@@ -3702,25 +4222,95 @@ img {
 
   .episode-card {
     grid-template-columns: 1fr;
-    width: min(18rem, 78vw);
+    width: min(13rem, 62vw);
   }
 
   .download-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 4.75rem minmax(0, 1fr);
+    column-gap: 0.7rem;
+    row-gap: 0.35rem;
+    align-items: start;
+    padding: 0.7rem;
+    border-radius: 0.9rem;
   }
 
   .download-card {
-    grid-template-columns: 1fr;
+    display: contents;
+  }
+
+  .download-artwork {
+    grid-row: 1 / span 2;
+    width: 4.75rem;
+    border-radius: 0.65rem;
+    aspect-ratio: 2 / 3;
+  }
+
+  .download-copy {
+    grid-column: 2;
+    align-content: start;
+    gap: 0.18rem;
+  }
+
+  .download-copy h4 {
+    font-size: 0.9rem;
+    line-height: 1.15;
+  }
+
+  .download-subtitle,
+  .download-detail {
+    font-size: 0.72rem;
+    line-height: 1.25;
+  }
+
+  .download-side {
+    grid-column: 2;
+    align-content: start;
+    gap: 0;
+  }
+
+  .download-progress-panel {
+    gap: 0.35rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .download-progress-header {
+    gap: 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  .download-progress-header span {
+    display: none;
+  }
+
+  .download-progress-row {
+    gap: 0.45rem;
+  }
+
+  .download-action-button {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.9rem;
   }
 
   .calendar-header {
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
+    align-items: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 4.75rem 0;
+    text-align: center;
   }
 
-  .search-header {
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
+  .search-header,
+  .downloads-header {
+    align-items: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 4.75rem 0;
+    text-align: center;
+  }
+
+  .search-header h2,
+  .downloads-header h2 {
+    justify-content: center;
   }
 
   .search-form {
@@ -3737,6 +4327,37 @@ img {
 
   .calendar-entry-time {
     padding-top: 0;
+  }
+
+  .media-tile.landscape,
+  .media-tile.episode {
+    width: min(7rem, 30vw);
+  }
+
+  .landscape .media-art,
+  .episode .media-art {
+    aspect-ratio: 2 / 3;
+  }
+
+  .media-tile.has-landscape-logo .media-landscape-logo-wrap {
+    display: none;
+  }
+
+  .media-tile:hover,
+  .media-tile:focus-within {
+    transform: none;
+  }
+
+  .library-grid,
+  .search-results-grid {
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    gap: 0.6rem;
+    padding: 0.75rem;
+  }
+
+  .library-grid .media-tile.landscape,
+  .search-results-grid .media-tile.landscape {
+    width: 100%;
   }
 }
 
