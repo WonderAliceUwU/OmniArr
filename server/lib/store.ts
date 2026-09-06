@@ -13,9 +13,10 @@ interface EncryptedConfig {
 }
 
 interface StoredState {
-  version: 1;
+  version: 1 | 2;
   admin: StoredAdmin | null;
   config: EncryptedConfig | null;
+  configKey: string | null;
 }
 
 const DATA_DIR = resolve(process.env.OMNIARR_DATA_DIR || resolve(process.cwd(), 'data'));
@@ -24,7 +25,8 @@ const STORE_FILE = resolve(DATA_DIR, 'omniarr.secure.json');
 const EMPTY_STATE: StoredState = {
   version: 1,
   admin: null,
-  config: null
+  config: null,
+  configKey: null
 };
 
 export async function loadState(): Promise<StoredState> {
@@ -33,9 +35,10 @@ export async function loadState(): Promise<StoredState> {
     const parsed = JSON.parse(raw) as Partial<StoredState>;
 
     return {
-      version: 1,
+      version: parsed.configKey ? 2 : 1,
       admin: parsed.admin ?? null,
-      config: parsed.config ?? null
+      config: parsed.config ?? null,
+      configKey: typeof parsed.configKey === 'string' ? parsed.configKey : null
     };
   } catch {
     return EMPTY_STATE;
@@ -47,11 +50,6 @@ export async function saveState(state: StoredState): Promise<void> {
   await writeFile(STORE_FILE, JSON.stringify(state, null, 2), 'utf8');
 }
 
-export async function needsSetup(): Promise<boolean> {
-  const state = await loadState();
-  return !state.admin;
-}
-
 export async function readEncryptedConfig(): Promise<EncryptedConfig | null> {
   const state = await loadState();
   return state.config;
@@ -59,12 +57,14 @@ export async function readEncryptedConfig(): Promise<EncryptedConfig | null> {
 
 export async function saveAdminAndConfig(
   admin: StoredAdmin,
-  config: EncryptedConfig
+  config: EncryptedConfig,
+  configKey: string
 ): Promise<void> {
   await saveState({
-    version: 1,
+    version: 2,
     admin,
-    config
+    config,
+    configKey
   });
 }
 
@@ -79,6 +79,11 @@ export async function updateEncryptedConfig(config: EncryptedConfig): Promise<vo
 export async function readAdmin(): Promise<StoredAdmin | null> {
   const state = await loadState();
   return state.admin;
+}
+
+export async function migrateConfig(config: EncryptedConfig, configKey: string): Promise<void> {
+  const state = await loadState();
+  await saveState({ ...state, version: 2, config, configKey });
 }
 
 export type { EncryptedConfig, StoredAdmin, StoredState };

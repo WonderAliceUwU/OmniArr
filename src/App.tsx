@@ -31,7 +31,7 @@ import {
   type TitleDetailsResponse,
 } from '../shared/contracts'
 
-type AuthState = 'loading' | 'setup' | 'login' | 'app'
+type AuthState = 'loading' | 'setup' | 'login' | 'profiles' | 'admin' | 'app'
 type EntryStage = 'onboarding' | 'profiles' | 'dashboard'
 type EntryTransitionState = 'idle' | 'forward-enter' | 'forward-exit' | 'back-enter' | 'back-exit'
 const MAX_CACHED_HUB_PAGES = 3
@@ -67,6 +67,7 @@ const networkSidebarItems: Array<{ route: AppRoute; label: string; icon: string;
 
 function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
+  const [sessionRole, setSessionRole] = useState<'admin' | 'user' | null>(null)
   const [entryStage, setEntryStage] = useState<EntryStage>('profiles')
   const [route, setRoute] = useState<AppRoute>('home')
   const [busy, setBusy] = useState(false)
@@ -171,18 +172,21 @@ function App() {
         }
 
         if (!session.authenticated) {
-          setAuthState('login')
+          const profiles = await api.getProfiles()
+          if (cancelled) return
+          setOptions((current) => ({ ...current, jellyfinUsers: profiles.jellyfinUsers }))
+          setConnections(profiles.connections)
+          setAuthState('profiles')
           return
         }
 
+        setSessionRole(session.role ?? null)
         await refreshBaseData()
-        if (!cancelled) {
-          setAuthState('app')
-        }
+        if (!cancelled) setAuthState(session.role === 'admin' ? 'admin' : 'app')
       } catch (bootError) {
         if (!cancelled) {
           setError(bootError instanceof Error ? bootError.message : 'Failed to start OmniArr.')
-          setAuthState('login')
+      setAuthState('profiles')
         }
       }
     }
@@ -258,10 +262,13 @@ function App() {
       }
       await refreshBaseData()
       setPassword('')
+      setSessionRole('admin')
       if (authState === 'setup') {
         setNotice('Instance initialized.')
+      } else {
+        setRoute('settings')
       }
-      setAuthState('app')
+      setAuthState(authState === 'setup' ? 'app' : 'admin')
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : 'Authentication failed.')
     } finally {
@@ -288,23 +295,17 @@ function App() {
     }
   }
 
-  async function handleSelectJellyfinUser(userId: string) {
+  async function handleSelectJellyfinUser(userId: string, jellyfinPassword: string) {
     setBusy(true)
     setError('')
     setNotice('')
     try {
-      const nextConfig = {
-        ...config,
-        jellyfin: {
-          ...config.jellyfin,
-          userId,
-        },
-      }
-      const response = await api.saveSettings(nextConfig)
-      setConfig(response.config)
+      await api.loginProfile({ userId, password: jellyfinPassword })
+      setSessionRole('user')
       await refreshBaseData()
       await transitionEntryStage('dashboard')
       setRoute('home')
+      setAuthState('app')
     } catch (selectError) {
       setError(selectError instanceof Error ? selectError.message : 'Failed to select Jellyfin profile.')
     } finally {
@@ -422,15 +423,58 @@ function App() {
     return <LoadingScreen />
   }
 
-  if (authState === 'setup' || authState === 'login') {
+  if (authState === 'setup') {
     return (
       <AuthScreen
         busy={busy}
         error={error}
-        mode={authState}
         onSubmit={handleAuthSubmit}
         password={password}
         setPassword={setPassword}
+      />
+    )
+  }
+
+  if (authState === 'login') {
+    return (
+      <AdministrationLoginScreen
+        busy={busy}
+        error={error}
+        onBack={() => { setPassword(''); setAuthState('profiles') }}
+        onSubmit={handleAuthSubmit}
+        password={password}
+        setPassword={setPassword}
+      />
+    )
+  }
+
+  if (authState === 'profiles') {
+    return (
+      <ProfileSelectionScreen
+        busy={busy}
+        currentUserId=""
+        hasServiceFailure={connections.some((connection) => !connection.ok)}
+        error={error}
+        notice={notice}
+        onAdmin={() => setAuthState(sessionRole === 'admin' ? 'admin' : 'login')}
+        onSelectUser={handleSelectJellyfinUser}
+        users={options.jellyfinUsers}
+      />
+    )
+  }
+
+  if (authState === 'admin') {
+    return (
+      <AdministrationScreen
+        busy={busy}
+        config={config}
+        connections={connections}
+        jellyfinUsersBusy={jellyfinUsersBusy}
+        onExit={() => setAuthState('profiles')}
+        onLoadJellyfinUsers={handleLoadJellyfinUsers}
+        onSave={handleSaveSettings}
+        options={options}
+        updateConfig={updateConfig}
       />
     )
   }
@@ -460,10 +504,12 @@ function App() {
       <div className={getEntryTransitionClassName(entryTransitionState)}>
         <ProfileSelectionScreen
           busy={busy}
-          currentUserId={config.jellyfin.userId}
+          currentUserId={sessionRole === 'user' ? config.jellyfin.userId : ''}
+          hasServiceFailure={connections.some((connection) => !connection.ok)}
           error={error}
           notice={notice}
-          onBackToOnboarding={() => void transitionEntryStage('onboarding')}
+          onAdmin={() => setAuthState(sessionRole === 'admin' ? 'admin' : 'login')}
+          onContinue={() => void transitionEntryStage('dashboard')}
           onSelectUser={handleSelectJellyfinUser}
           users={options.jellyfinUsers}
         />
@@ -471,8 +517,9 @@ function App() {
     )
   }
 
-  const currentJellyfinUser =
-    options.jellyfinUsers.find((option) => option.id === config.jellyfin.userId)?.label || 'Media cockpit'
+  const currentJellyfinUser = sessionRole === 'admin'
+    ? 'Administration'
+    : options.jellyfinUsers.find((option) => option.id === config.jellyfin.userId)?.label || 'Media cockpit'
   const currentHub = route !== 'downloads' && route !== 'settings' && route !== 'calendar' && route !== 'search' ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
@@ -483,6 +530,7 @@ function App() {
         currentUser={currentJellyfinUser}
         diskSpace={diskSpace}
         onExitProfile={() => void transitionEntryStage('profiles')}
+        canManage={sessionRole === 'admin'}
         route={route}
         setRoute={setRoute}
       />
@@ -564,6 +612,7 @@ function Sidebar(props: {
   diskSpace: DiskSpaceStatus | null
   connections: ConnectionStatus[]
   busy: boolean
+  canManage: boolean
   onExitProfile: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -673,7 +722,7 @@ function Sidebar(props: {
 
         <div className="sidebar-footer">
           {props.diskSpace ? <DiskSpaceIndicator diskSpace={props.diskSpace} /> : null}
-          <button className="ghost-button sidebar-settings" onClick={() => navigate('settings')} type="button">
+          {props.canManage ? <button className="ghost-button sidebar-settings" onClick={() => navigate('settings')} type="button">
             <span className="sidebar-settings-icon" aria-hidden="true">
               <SettingsGlyph />
               <span
@@ -683,6 +732,7 @@ function Sidebar(props: {
             </span>
             <span>Settings</span>
           </button>
+          : null}
         </div>
         </div>
       </aside>
@@ -817,14 +867,12 @@ function ActionButton(props: {
 }
 
 function AuthScreen({
-  mode,
   password,
   setPassword,
   onSubmit,
   busy,
   error,
 }: {
-  mode: 'setup' | 'login'
   password: string
   setPassword: (value: string) => void
   onSubmit: () => Promise<void>
@@ -832,7 +880,6 @@ function AuthScreen({
   error: string
 }) {
   const isPasswordValid = password.trim().length >= 8
-  const isSetup = mode === 'setup'
 
   function handleSubmit() {
     if (busy || !isPasswordValid) {
@@ -843,15 +890,11 @@ function AuthScreen({
   }
 
   return (
-    <div className={isSetup ? 'auth-layout' : 'auth-layout auth-layout-login'}>
-      <section className={isSetup ? 'auth-panel' : 'auth-panel auth-panel-login'}>
+    <div className="auth-layout">
+      <section className="auth-panel">
         <div className="auth-panel-shell">
-          <h1>{isSetup ? 'Create your master password' : 'Sign in to OmniArr'}</h1>
-          <p className="auth-copy">
-            {isSetup
-              ? 'This password protects the session and encrypts service settings on the server.'
-              : 'Unlock the server session with your master password.'}
-          </p>
+          <h1>Create your master password</h1>
+          <p className="auth-copy">This password protects the administration area and service settings.</p>
         </div>
         <div className="auth-form-card">
           <form
@@ -862,45 +905,39 @@ function AuthScreen({
             }}
           >
             <label>
-              {isSetup ? 'Master password' : 'Password'}
+              Master password
               <input
-                autoComplete={isSetup ? 'new-password' : 'current-password'}
+                autoComplete="new-password"
                 className="input"
                 minLength={8}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder={isSetup ? 'At least 8 characters' : ''}
+                placeholder="At least 8 characters"
                 type="password"
                 value={password}
               />
             </label>
-            {isSetup && !isPasswordValid && password.length > 0 ? <p className="helper-text">Password must be at least 8 non-space characters.</p> : null}
+            {!isPasswordValid && password.length > 0 ? <p className="helper-text">Password must be at least 8 non-space characters.</p> : null}
             {error ? <p className="error-banner">{error}</p> : null}
             {busy ? <p className="notice">Contacting backend…</p> : null}
             <button className="primary-button" disabled={busy || !isPasswordValid} type="submit">
-              {busy ? 'Processing…' : isSetup ? 'Initialize' : 'Sign in'}
+              {busy ? 'Processing…' : 'Initialize'}
             </button>
           </form>
         </div>
       </section>
 
-      {isSetup ? (
-        <section className="auth-visual">
-          <div className="auth-wallpaper" />
-          <div className="glass-card">
-            <p className="eyebrow">Migration</p>
-            <ul className="feature-list">
-              <li>Server-side session auth</li>
-              <li>Encrypted persisted settings</li>
-              <li>Jellyfin, Sonarr and Radarr</li>
-              <li>Rebuilt React UI with Reiverr layout</li>
-            </ul>
-          </div>
-        </section>
-      ) : (
-        <section className="auth-visual auth-visual-login" aria-hidden="true">
-          <div className="auth-wallpaper" />
-        </section>
-      )}
+      <section className="auth-visual">
+        <div className="auth-wallpaper" />
+        <div className="glass-card">
+          <p className="eyebrow">Migration</p>
+          <ul className="feature-list">
+            <li>Server-side session auth</li>
+            <li>Encrypted persisted settings</li>
+            <li>Jellyfin, Sonarr and Radarr</li>
+            <li>Rebuilt React UI with Reiverr layout</li>
+          </ul>
+        </div>
+      </section>
     </div>
   )
 }
@@ -947,7 +984,7 @@ function JellyfinOnboardingScreen(props: {
           <div className="profile-grid compact">
             {props.users.map((user) => (
               <div className="profile-card static" key={user.id}>
-                <div className="profile-avatar">{user.label.slice(0, 1).toUpperCase()}</div>
+                <ProfileAvatar user={user} />
                 <strong>{user.label}</strong>
               </div>
             ))}
@@ -961,40 +998,149 @@ function JellyfinOnboardingScreen(props: {
 function ProfileSelectionScreen(props: {
   users: SelectOption[]
   currentUserId: string
+  hasServiceFailure: boolean
   busy: boolean
   error: string
   notice: string
-  onSelectUser: (userId: string) => Promise<void>
-  onBackToOnboarding: () => void
+  onSelectUser: (userId: string, password: string) => Promise<void>
+  onAdmin: () => void
+  onContinue?: () => void
 }) {
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const [password, setPassword] = useState('')
+  const [isReturning, setIsReturning] = useState(false)
+  const [hasReturned, setHasReturned] = useState(false)
+  const [isSelecting, setIsSelecting] = useState(false)
+  const [isEntering, setIsEntering] = useState(false)
+
+  function submit() {
+    if (selectedUserId && password) {
+      void props.onSelectUser(selectedUserId, password)
+    }
+  }
+
+  function goBack() {
+    setIsReturning(true)
+    window.setTimeout(() => {
+      setSelectedUserId('')
+      setPassword('')
+      setIsReturning(false)
+      setHasReturned(true)
+      window.setTimeout(() => setHasReturned(false), 520)
+    }, 240)
+  }
+
+  function selectProfile(userId: string) {
+    setIsSelecting(true)
+    window.setTimeout(() => {
+      setSelectedUserId(userId)
+      setIsSelecting(false)
+      setIsEntering(true)
+      window.setTimeout(() => setIsEntering(false), 520)
+    }, 240)
+  }
+
+  const selectedUser = props.users.find((user) => user.id === selectedUserId)
+
   return (
-    <div className="profiles-layout">
+    <div className={selectedUser ? `profiles-layout is-profile-login${isReturning ? ' is-returning' : ''}${isEntering ? ' is-entering' : ''}` : `profiles-layout${hasReturned ? ' is-profile-return' : ''}${isSelecting ? ' is-profile-selecting' : ''}`}>
       <div className="profiles-header">
-        <p className="eyebrow">Profiles</p>
-        <h1>Who&apos;s watching?</h1>
+        <h1>{selectedUser ? `Sign in as ${selectedUser.label}` : 'Who\'s watching?'}</h1>
         {props.error ? <p className="error-banner">{props.error}</p> : null}
         {props.notice ? <p className="notice">{props.notice}</p> : null}
       </div>
-      <div className="profile-grid">
+      {selectedUser ? <ProfileLoginForm busy={props.busy} icon={<ProfileAvatar user={selectedUser} />} onBack={goBack} onSubmit={submit} password={password} placeholder="Enter the password" setPassword={setPassword} /> : <div className="profile-grid">
         {props.users.map((user) => (
           <button
             className={user.id === props.currentUserId ? 'profile-card active' : 'profile-card'}
-            disabled={props.busy}
+            disabled={props.busy || isSelecting}
             key={user.id}
-            onClick={() => void props.onSelectUser(user.id)}
+            onClick={() => {
+              if (user.id === props.currentUserId) {
+                props.onContinue?.()
+              } else {
+                selectProfile(user.id)
+              }
+            }}
             type="button"
           >
-            <div className="profile-avatar">{user.label.slice(0, 1).toUpperCase()}</div>
+            <ProfileAvatar user={user} />
             <strong>{user.label}</strong>
+            {user.id === props.currentUserId ? <span className="profile-active-check" aria-label="Current profile">✓</span> : null}
           </button>
         ))}
-      </div>
-      <div className="profiles-actions">
-        <button className="ghost-button" onClick={props.onBackToOnboarding} type="button">
-          Edit Jellyfin connection
+      </div>}
+      {!selectedUser ? <div className="profiles-actions">
+        <button aria-label="Administration" className="profile-admin-button" onClick={props.onAdmin} title="Administration" type="button">
+          <span className="profile-admin-icon">
+            <SettingsGlyph />
+            <span className={props.hasServiceFailure ? 'profile-admin-status down' : 'profile-admin-status ok'} />
+          </span>
         </button>
-      </div>
+      </div> : null}
     </div>
+  )
+}
+
+function ProfileAvatar({ user }: { user: SelectOption }) {
+  return <div className="profile-avatar">{user.imageUrl ? <img alt="" src={user.imageUrl} /> : user.label.slice(0, 1).toUpperCase()}</div>
+}
+
+function AdministrationLoginScreen(props: {
+  busy: boolean
+  error: string
+  password: string
+  setPassword: (value: string) => void
+  onBack: () => void
+  onSubmit: () => Promise<void>
+}) {
+  const [isReturning, setIsReturning] = useState(false)
+
+  function goBack() {
+    setIsReturning(true)
+    window.setTimeout(props.onBack, 240)
+  }
+
+  return (
+    <div className={`profiles-layout is-profile-login is-entering${isReturning ? ' is-returning' : ''}`}>
+      <div className="profiles-header">
+        <h1>Administration</h1>
+        {props.error ? <p className="error-banner">{props.error}</p> : null}
+      </div>
+      <ProfileLoginForm busy={props.busy} icon={<div className="administration-login-icon"><SettingsGlyph /></div>} onBack={goBack} onSubmit={() => { void props.onSubmit() }} password={props.password} placeholder="Enter the master password" setPassword={props.setPassword} />
+    </div>
+  )
+}
+
+function ProfileLoginForm(props: {
+  busy: boolean
+  icon: ReactNode
+  password: string
+  placeholder: string
+  setPassword: (value: string) => void
+  onBack: () => void
+  onSubmit: () => void
+}) {
+  return (
+    <form className="profile-login-form" onSubmit={(event) => { event.preventDefault(); props.onSubmit() }}>
+      {props.icon}
+      <label>
+        <input autoComplete="current-password" autoFocus className="input" onChange={(event) => props.setPassword(event.target.value)} placeholder={props.placeholder} type="password" value={props.password} />
+      </label>
+      <div className="profile-login-actions">
+        <button aria-label="Back to profiles" className="profile-login-back" onClick={props.onBack} title="Back to profiles" type="button"><ArrowLeftGlyph /></button>
+        <button aria-label="Sign in" className="profile-login-submit" disabled={props.busy || !props.password} title="Sign in" type="submit"><SignInGlyph /></button>
+      </div>
+    </form>
+  )
+}
+
+function SignInGlyph() {
+  return (
+    <svg aria-hidden="true" className="sidebar-glyph-icon" fill="none" viewBox="0 0 16 16">
+      <path d="M9.7 2.5H4.3A1.3 1.3 0 0 0 3 3.8v8.4a1.3 1.3 0 0 0 1.3 1.3h5.4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M8 8h5M10.85 5.15 13.7 8l-2.85 2.85" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+    </svg>
   )
 }
 
@@ -3159,6 +3305,47 @@ function formatCalendarTime(startsAt: string) {
   }).format(date)
 }
 
+function AdministrationScreen(props: {
+  config: AppConfig
+  connections: ConnectionStatus[]
+  jellyfinUsersBusy: boolean
+  onExit: () => void
+  onLoadJellyfinUsers: () => Promise<void>
+  updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
+  options: ServiceOptionsResponse
+  onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  busy: boolean
+}) {
+  return (
+    <div className="administration-layout">
+      <header className="administration-header">
+        <button aria-label="Back to profiles" className="administration-back-button" onClick={props.onExit} title="Back to profiles" type="button">
+          <ArrowLeftGlyph />
+        </button>
+        <div>
+          <p className="eyebrow">Administration</p>
+          <h1>Settings</h1>
+        </div>
+        <button aria-label="Save settings" className={props.busy ? 'administration-save-button is-saving' : 'administration-save-button'} disabled={props.busy} form="administration-settings" title="Save settings" type="submit">
+          <CheckGlyph />
+        </button>
+      </header>
+      <SettingsView
+        busy={props.busy}
+        config={props.config}
+        connections={props.connections}
+        jellyfinUsersBusy={props.jellyfinUsersBusy}
+        onLoadJellyfinUsers={props.onLoadJellyfinUsers}
+        onSave={props.onSave}
+        options={props.options}
+        formId="administration-settings"
+        showSubmit={false}
+        updateConfig={props.updateConfig}
+      />
+    </div>
+  )
+}
+
 function SettingsView(props: {
   config: AppConfig
   connections: ConnectionStatus[]
@@ -3168,9 +3355,11 @@ function SettingsView(props: {
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
   busy: boolean
+  formId?: string
+  showSubmit?: boolean
 }) {
   return (
-    <form className="settings-page" onSubmit={(event) => void props.onSave(event)}>
+    <form className="settings-page" id={props.formId} onSubmit={(event) => void props.onSave(event)}>
       <SettingsCard title="Connections">
         <div className="settings-connections">
           {props.connections.map((connection) => (
@@ -3249,11 +3438,11 @@ function SettingsView(props: {
         </label>
       </SettingsCard>
 
-      <div className="actions-row">
+      {props.showSubmit !== false ? <div className="actions-row">
         <button className="primary-button" disabled={props.busy} type="submit">
           {props.busy ? 'Saving…' : 'Save settings'}
         </button>
-      </div>
+      </div> : null}
     </form>
   )
 }

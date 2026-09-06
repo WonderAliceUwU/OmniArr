@@ -2,8 +2,8 @@
 
 React + TypeScript frontend with a built-in Node backend for:
 
-- master-password login with `HttpOnly` session cookie
-- encrypted storage of service settings
+- Jellyfin-profile login with an `HttpOnly` session cookie
+- master-password protected administration and server-side service settings
 - Jellyfin, Sonarr, Radarr, qBittorrent and TMDb integration
 - a single production process for Docker/TrueNAS
 
@@ -27,7 +27,7 @@ That file contains:
 
 - master-password verifier
 - encryption salt
-- encrypted application settings
+- server-managed encryption key and encrypted application settings
 
 If you do not persist `/app/data`, you will lose:
 
@@ -139,6 +139,6 @@ That dataset is the piece that must survive updates and image replacements.
 
 On first boot there is no default password.
 
-You create the master password in the UI.
+You create the master password in the UI. It protects the Administration area; viewers sign in from the profile screen using their own Jellyfin password.
 
 After that, OmniArr stores only the verifier and encrypted settings in `/app/data/omniarr.secure.json`.
