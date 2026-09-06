@@ -67,6 +67,7 @@ export interface AppConfig {
 export interface SelectOption {
   id: string;
   label: string;
+  imageUrl?: string;
 }
 
 export interface ServiceOptionsResponse {
@@ -313,10 +314,16 @@ export interface HubPageResponse {
 export interface SessionResponse {
   needsSetup: boolean;
   authenticated: boolean;
+  role?: 'admin' | 'user';
+  userId?: string;
 }
 
 export interface AuthPayload {
   password: string;
+}
+
+export interface JellyfinLoginPayload extends AuthPayload {
+  userId: string;
 }
 
 export interface AuthResponse {

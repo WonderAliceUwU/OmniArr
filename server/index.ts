@@ -8,12 +8,14 @@ import {
   type EpisodeRequestPayload,
   type EpisodeWatchStateRequest,
   type DiskSpaceStatus,
+  type HubPageResponse,
+  type JellyfinLoginPayload,
   type SeasonDeletePayload,
   type SeasonRequestPayload,
   type TitleDetailsRequest
 } from '../shared/contracts.js';
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
-import { loadState, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
+import { loadState, migrateConfig, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
 import {
   getCalendar,
   getConnectionStatuses,
@@ -26,6 +28,7 @@ import {
   deleteSeasonFiles,
   getServiceOptions,
   loadJellyfinUsers,
+  authenticateJellyfinUser,
   proxyJellyfinImage,
   removeDownload,
   requestEpisode,
@@ -40,7 +43,9 @@ import {
 } from './lib/services.js';
 
 interface SessionRecord {
-  encryptionKey: Buffer;
+  role: 'admin' | 'user';
+  userId?: string;
+  encryptionKey?: Buffer;
   expiresAt: number;
 }
 
@@ -48,6 +53,7 @@ const PORT = Number(process.env.PORT || 8787);
 const SESSION_COOKIE = 'omniarr_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const sessions = new Map<string, SessionRecord>();
+const sessionUsers = new WeakMap<Buffer, string>();
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 const server = createServer(async (request, response) => {
@@ -84,7 +90,9 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const session = getSession(request);
     sendJson(response, 200, {
       needsSetup: !state.admin,
-      authenticated: Boolean(session)
+      authenticated: Boolean(session),
+      role: session?.role,
+      userId: session?.userId
     });
     return;
   }
@@ -106,16 +114,17 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     }
 
     const record = createPasswordRecord(password);
-    const encryptionKey = deriveEncryptionKey(password, record.encryptionSalt);
+    const configKey = createConfigKey();
     await saveAdminAndConfig(
       {
         ...record,
         createdAt: new Date().toISOString()
       },
-      encryptJson(defaultConfig, encryptionKey)
+      encryptJson(defaultConfig, Buffer.from(configKey)),
+      configKey
     );
 
-    const token = createSession(encryptionKey);
+    const token = createSession({ role: 'admin', encryptionKey: Buffer.from(randomToken()) });
     setSessionCookie(request, response, token);
     resetFailedAttempts(getClientAddress(request));
     console.log('Register completed successfully');
@@ -149,8 +158,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
       return;
     }
 
-    const encryptionKey = deriveEncryptionKey(password, admin.encryptionSalt);
-    const token = createSession(encryptionKey);
+    const legacyEncryptionKey = deriveEncryptionKey(password, admin.encryptionSalt);
+    const state = await loadState();
+    if (!state.configKey && state.config) {
+      const config = await readConfig(legacyEncryptionKey);
+      const configKey = createConfigKey();
+      await migrateConfig(encryptJson(config, Buffer.from(configKey)), configKey);
+    }
+    const token = createSession({ role: 'admin', encryptionKey: Buffer.from(randomToken()) });
     setSessionCookie(request, response, token);
     resetFailedAttempts(getClientAddress(request));
     console.log('Login completed successfully');
@@ -158,6 +173,53 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
       ok: true,
       needsSetup: false
     });
+    return;
+  }
+
+  if (url.pathname === '/api/auth/profiles' && method === 'GET') {
+    try {
+      const config = await readConfig();
+      const [jellyfinUsers, connections] = await Promise.all([
+        loadJellyfinUsers(config.jellyfin.baseUrl, config.jellyfin.apiKey),
+        getConnectionStatuses(config)
+      ]);
+      sendJson(response, 200, { jellyfinUsers, connections });
+    } catch {
+      sendJson(response, 409, { error: 'An administrator must sign in once to migrate the existing configuration.' });
+    }
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/auth/profile-image/') && method === 'GET') {
+    const config = await readConfig();
+    const userId = decodeURIComponent(url.pathname.replace('/api/auth/profile-image/', ''));
+    const image = await proxyJellyfinImage(config, userId, 'Primary', 160, url.searchParams.get('tag') || '', true);
+    if (!image) {
+      sendJson(response, 404, { error: 'Profile image not found.' });
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': image.contentType || 'image/jpeg', 'Cache-Control': 'private, max-age=3600' });
+    response.end(Buffer.from(image.data));
+    return;
+  }
+
+  if (url.pathname === '/api/auth/profile-login' && method === 'POST') {
+    if (isRateLimited(getClientAddress(request))) {
+      sendJson(response, 429, { error: 'Too many attempts. Wait one minute.' });
+      return;
+    }
+    const body = await readJson<JellyfinLoginPayload>(request);
+    const config = await readConfig();
+    const userId = String(body.userId || '');
+    if (!await authenticateJellyfinUser(config, userId, String(body.password || ''))) {
+      trackFailedAttempt(getClientAddress(request));
+      sendJson(response, 401, { error: 'Incorrect Jellyfin password.' });
+      return;
+    }
+    const token = createSession({ role: 'user', userId, encryptionKey: Buffer.from(randomToken()) });
+    setSessionCookie(request, response, token);
+    resetFailedAttempts(getClientAddress(request));
+    sendJson(response, 200, { ok: true, needsSetup: false });
     return;
   }
 
@@ -178,16 +240,21 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     return;
   }
 
+  if (url.pathname === '/api/settings' && method === 'PUT' && session?.role !== 'admin') {
+    sendJson(response, 403, { error: 'Administrator access is required.' });
+    return;
+  }
+
   if (url.pathname === '/api/settings' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
-    sendJson(response, 200, config);
+    sendJson(response, 200, session!.role === 'admin' ? config : redactConfig(config));
     return;
   }
 
   if (url.pathname === '/api/settings' && method === 'PUT') {
     const body = await readJson<AppConfig>(request);
     const config = sanitizeConfig(body);
-    await updateEncryptedConfig(encryptJson(config, session!.encryptionKey));
+    await updateEncryptedConfig(encryptJson(config, await getConfigEncryptionKey()));
     const connections = await getConnectionStatuses(config);
     sendJson(response, 200, {
       config,
@@ -227,7 +294,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const page = decodeURIComponent(url.pathname.replace('/api/hubs/', ''));
     console.log(`[API] GET /api/hubs/${page}`);
     try {
-      const result = await getHubPage(config, page as any);
+      const result = await getHubPage(config, page as HubPageResponse['page']);
       sendJson(response, 200, result);
     } catch (err) {
       console.error(`[API] Error in GET /api/hubs/${page}:`, err);
@@ -259,7 +326,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     if (startParam) {
         try {
             start = new Date(startParam);
-        } catch (e) {
+        } catch {
             // ignore invalid date
         }
     }
@@ -267,7 +334,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     if (endParam) {
         try {
             end = new Date(endParam);
-        } catch (e) {
+        } catch {
             // ignore invalid date
         }
     }
@@ -401,13 +468,20 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
   await serveApp(url.pathname, response);
 }
 
-function createSession(encryptionKey: Buffer): string {
+function createSession(session: Omit<SessionRecord, 'expiresAt'>): string {
   const token = randomToken();
+  if (session.userId && session.encryptionKey) {
+    sessionUsers.set(session.encryptionKey, session.userId);
+  }
   sessions.set(token, {
-    encryptionKey,
+    ...session,
     expiresAt: Date.now() + SESSION_TTL_MS
   });
   return token;
+}
+
+function createConfigKey(): string {
+  return randomToken().slice(0, 32);
 }
 
 async function getDiskSpaceStatus(config: AppConfig): Promise<DiskSpaceStatus | null> {
@@ -466,15 +540,21 @@ function clearSessionCookie(request: IncomingMessage, response: ServerResponse):
   );
 }
 
-async function readConfig(encryptionKey: Buffer): Promise<AppConfig> {
+async function readConfig(legacyEncryptionKey?: Buffer): Promise<AppConfig> {
   const encrypted = await readEncryptedConfig();
   if (!encrypted) {
     return defaultConfig;
   }
 
+  const state = await loadState();
+  const encryptionKey = state.configKey ? Buffer.from(state.configKey) : legacyEncryptionKey;
+  if (!encryptionKey) {
+    throw new Error('The configuration must be unlocked by an administrator.');
+  }
+
   const stored = decryptJson<Partial<AppConfig>>(encrypted, encryptionKey);
 
-  return sanitizeConfig({
+  const config = sanitizeConfig({
     preferences: {
       ...defaultConfig.preferences,
       ...(stored.preferences || {})
@@ -500,6 +580,27 @@ async function readConfig(encryptionKey: Buffer): Promise<AppConfig> {
       ...(stored.tvdb || {})
     }
   });
+  const userId = legacyEncryptionKey ? sessionUsers.get(legacyEncryptionKey) : undefined;
+  return userId ? { ...config, jellyfin: { ...config.jellyfin, userId } } : config;
+}
+
+async function getConfigEncryptionKey(): Promise<Buffer> {
+  const state = await loadState();
+  if (!state.configKey) {
+    throw new Error('The configuration must be unlocked by an administrator.');
+  }
+  return Buffer.from(state.configKey);
+}
+
+function redactConfig(config: AppConfig): AppConfig {
+  return {
+    ...config,
+    jellyfin: { ...config.jellyfin, apiKey: 'configured' },
+    sonarr: { ...config.sonarr, apiKey: '' },
+    radarr: { ...config.radarr, apiKey: '' },
+    tmdb: { ...config.tmdb, bearerToken: '' },
+    tvdb: { ...config.tvdb, apiKey: '' }
+  };
 }
 
 async function readJson<T>(request: IncomingMessage): Promise<T> {

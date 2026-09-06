@@ -3,10 +3,12 @@ import type {
   AuthPayload,
   AuthResponse,
   CalendarResponse,
+  ConnectionStatus,
   DashboardResponse,
   DiskSpaceStatus,
   DownloadsResponse,
   HubPageResponse,
+  JellyfinLoginPayload,
   MediaCard,
   SearchResponse,
   ServiceOptionsResponse,
@@ -64,6 +66,12 @@ export const api = {
     }),
   login: (payload: AuthPayload) =>
     request<AuthResponse>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getProfiles: () => request<{ jellyfinUsers: ServiceOptionsResponse['jellyfinUsers']; connections: ConnectionStatus[] }>('/api/auth/profiles'),
+  loginProfile: (payload: JellyfinLoginPayload) =>
+    request<AuthResponse>('/api/auth/profile-login', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

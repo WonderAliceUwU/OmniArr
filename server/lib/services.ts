@@ -517,6 +517,33 @@ export async function loadJellyfinUsers(baseUrl: string, apiKey: string): Promis
   return getJellyfinUsersFromConfig(normalizeBaseUrl(baseUrl), apiKey.trim());
 }
 
+export async function authenticateJellyfinUser(config: AppConfig, userId: string, password: string): Promise<boolean> {
+  if (!config.jellyfin.baseUrl || !userId || !password) {
+    return false;
+  }
+
+  const authorization = 'MediaBrowser Client="OmniArr", Device="OmniArr", DeviceId="omniarr-web", Version="1.0.0"';
+  const response = await fetch(`${config.jellyfin.baseUrl}/Users/AuthenticateByName`, {
+    method: 'POST',
+    headers: {
+      Authorization: authorization,
+      'X-Emby-Authorization': authorization,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      Username: (await getJellyfinUsers(config)).find((user) => user.id === userId)?.label || '',
+      Pw: password
+    })
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = await response.json() as { User?: { Id?: string } };
+  return payload.User?.Id === userId;
+}
+
 export async function getDashboard(config: AppConfig): Promise<DashboardResponse> {
   const [connections, library, downloads, tmdb] = await Promise.all([
     getConnectionStatuses(config),
@@ -2743,12 +2770,14 @@ export async function proxyJellyfinImage(
   itemId: string,
   kind: string,
   maxWidth: number,
-  tag: string
+  tag: string,
+  isUser = false
 ): Promise<{ data: ArrayBuffer; contentType: string | null } | null> {
   const candidates = kind === 'Primary' ? ['Primary'] : [kind, 'Primary'];
 
   for (const candidate of candidates) {
-    const path = `/Items/${encodeURIComponent(itemId)}/Images/${encodeURIComponent(candidate)}?quality=90&maxWidth=${maxWidth}&tag=${encodeURIComponent(tag)}`;
+    const collection = isUser ? 'Users' : 'Items';
+    const path = `/${collection}/${encodeURIComponent(itemId)}/Images/${encodeURIComponent(candidate)}?quality=90&maxWidth=${maxWidth}&tag=${encodeURIComponent(tag)}`;
     const response = await fetch(`${config.jellyfin.baseUrl}${path}`, {
       headers: {
         'X-Emby-Token': config.jellyfin.apiKey
@@ -3361,10 +3390,15 @@ async function getJellyfinUsersFromConfig(baseUrl: string, apiKey: string): Prom
     }
   );
 
-  return users.map((user) => ({
-    id: String(user.Id || ''),
-    label: String(user.Name || user.Id || 'User')
-  }));
+  return users.map((user) => {
+    const id = String(user.Id || '');
+    const imageTag = String(user.PrimaryImageTag || '');
+    return {
+      id,
+      label: String(user.Name || user.Id || 'User'),
+      ...(imageTag ? { imageUrl: `/api/auth/profile-image/${encodeURIComponent(id)}?tag=${encodeURIComponent(imageTag)}` } : {})
+    };
+  });
 }
 
 async function getSonarrRootFolders(config: AppConfig): Promise<SelectOption[]> {
