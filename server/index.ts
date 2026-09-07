@@ -10,6 +10,7 @@ import {
   type DiskSpaceStatus,
   type HubPageResponse,
   type JellyfinLoginPayload,
+  type MovieDeletePayload,
   type SeasonDeletePayload,
   type SeasonRequestPayload,
   type TitleDetailsRequest
@@ -25,6 +26,7 @@ import {
   searchTitles,
   getTitleDetails,
   getTmdbLogos,
+  deleteMovieFiles,
   deleteSeasonFiles,
   getServiceOptions,
   loadJellyfinUsers,
@@ -422,6 +424,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<SeasonDeletePayload>(request);
     await deleteSeasonFiles(config, body);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/movies/delete' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<MovieDeletePayload>(request);
+    await deleteMovieFiles(config, body);
     sendJson(response, 200, { ok: true });
     return;
   }
