@@ -3505,7 +3505,7 @@ img {
 }
 
 .profiles-layout {
-  height: 100%;
+  min-height: 100svh;
   overflow-y: auto;
   display: grid;
   align-content: center;
@@ -3757,8 +3757,11 @@ img {
   grid-template-columns: repeat(auto-fit, minmax(7.2rem, 1fr));
   justify-content: center;
   gap: 2rem;
-  width: min(100%, 72rem);
+  width: min(100%, 96rem);
   margin: 0 auto;
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.3rem;
 }
 
 .profile-card {
@@ -3826,7 +3829,7 @@ img {
 
 @media (max-width: 600px) {
   .profiles-layout {
-    align-content: start;
+    align-content: center;
     gap: 1.5rem;
     padding: 2rem 1.25rem;
   }
@@ -3839,6 +3842,7 @@ img {
     grid-template-columns: repeat(auto-fit, minmax(5.8rem, 1fr));
     gap: 1rem;
     width: 100%;
+    padding: 0.75rem;
   }
 
   .profile-card {
