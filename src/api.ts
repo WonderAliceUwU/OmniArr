@@ -122,15 +122,15 @@ export const api = {
     request<{ ok: boolean }>('/api/downloads/dismiss-all', {
       method: 'POST',
     }),
-  requestMovie: (tmdbId: number, user: string | null) =>
+  requestMovie: (tmdbId: number, user: string | null, qualityProfileId?: number) =>
     request<{ ok: boolean }>('/api/requests/movie', {
       method: 'POST',
-      body: JSON.stringify({ tmdbId, user }),
+      body: JSON.stringify({ tmdbId, user, qualityProfileId }),
     }),
-  requestSeries: (tmdbId: number, user: string | null) =>
+  requestSeries: (tmdbId: number, user: string | null, qualityProfileId?: number) =>
     request<{ ok: boolean }>('/api/requests/series', {
       method: 'POST',
-body: JSON.stringify({ tmdbId, user }),
+      body: JSON.stringify({ tmdbId, user, qualityProfileId }),
     }),
   requestSeason: (payload: SeasonRequestPayload, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/season', {

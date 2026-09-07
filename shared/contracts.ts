@@ -53,6 +53,8 @@ export interface AppPreferences {
   region: string;
   excludeLibraryItems: boolean;
   animationLevel: 'smooth' | 'reduced';
+  sonarrDownloadQualityProfileIds: string[];
+  radarrDownloadQualityProfileIds: string[];
 }
 
 export interface AppConfig {
@@ -230,6 +232,7 @@ export interface CompletedDownloadItem {
   backdropUrl?: string;
   tmdbId?: number;
   mediaType?: 'movie' | 'tv' | 'series';
+  status: 'completed' | 'cancelled';
   completedAt: string;
 }
 
@@ -286,10 +289,12 @@ export interface EpisodeWatchStateRequest {
 export interface SeasonRequestPayload {
   seriesId: number;
   seasonNumber: number;
+  qualityProfileId?: number;
 }
 
 export interface EpisodeRequestPayload {
   episodeId: number;
+  qualityProfileId?: number;
 }
 
 export interface SeasonDeletePayload {
@@ -345,7 +350,9 @@ export const defaultConfig: AppConfig = {
     language: 'en-US',
     region: 'US',
     excludeLibraryItems: true,
-    animationLevel: 'smooth'
+    animationLevel: 'smooth',
+    sonarrDownloadQualityProfileIds: [],
+    radarrDownloadQualityProfileIds: []
   },
   jellyfin: {
     baseUrl: '',

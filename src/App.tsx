@@ -140,6 +140,13 @@ function App() {
     setEntryStage(resolveEntryStage(settings, serviceOptions))
   }
 
+  async function refreshDownloads() {
+    const response = await api.getDownloads()
+    setDownloads(response.downloading)
+    setProcessingItems(response.processing)
+    setCompletedDownloads(response.completed)
+  }
+
   async function loadHub(page: HubPageResponse['page'], options?: { silent?: boolean }) {
     if (!options?.silent) {
       setHubLoading(true)
@@ -207,8 +214,11 @@ function App() {
     }
 
     if (route === 'downloads') {
-      void refreshBaseData()
-      return
+      void refreshDownloads()
+      const interval = window.setInterval(() => {
+        void refreshDownloads()
+      }, 2500)
+      return () => window.clearInterval(interval)
     }
 
     const page = route as HubPageResponse['page']
@@ -330,7 +340,7 @@ function App() {
     }
   }
 
-  async function handleRequest(card: MediaCard) {
+  async function handleRequest(card: MediaCard, qualityProfileId?: number) {
     if (!card.tmdbId) return
 
     setBusy(true)
@@ -338,9 +348,9 @@ function App() {
     setNotice('')
     try {
       if (card.mediaType === 'movie') {
-        await api.requestMovie(card.tmdbId, currentJellyfinUser)
+        await api.requestMovie(card.tmdbId, currentJellyfinUser, qualityProfileId)
       } else {
-        await api.requestSeries(card.tmdbId, currentJellyfinUser)
+        await api.requestSeries(card.tmdbId, currentJellyfinUser, qualityProfileId)
       }
       if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
         await loadHub(route as HubPageResponse['page'], { silent: true })
@@ -359,11 +369,7 @@ function App() {
     setNotice('')
     try {
       await api.deleteDownload({ id })
-      const resp = await api.getDownloads()
-      setDownloads(resp.downloading)
-      setProcessingItems(resp.processing)
-      setCompletedDownloads(resp.completed)
-      setNotice('Download removed from the queue.')
+      await refreshDownloads()
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Failed to remove the download.')
     } finally {
@@ -587,6 +593,10 @@ function App() {
         <TitleDetailsModal
           card={selectedCard.card}
           config={config}
+          qualityProfiles={{
+            sonarr: options.sonarrQualityProfiles.filter((profile) => config.preferences.sonarrDownloadQualityProfileIds.includes(profile.id)),
+            radarr: options.radarrQualityProfiles.filter((profile) => config.preferences.radarrDownloadQualityProfileIds.includes(profile.id)),
+          }}
           onClose={() => setSelectedCard(null)}
           originRect={selectedCard.originRect}
           onRequest={handleRequest}
@@ -1561,8 +1571,9 @@ function TitleDetailsModal(props: {
   config: AppConfig
   onClose: () => void
   originRect: ModalOriginRect | null
-  onRequest: (card: MediaCard) => Promise<void>
+  onRequest: (card: MediaCard, qualityProfileId?: number) => Promise<void>
   currentUser: string | null
+  qualityProfiles: { sonarr: SelectOption[]; radarr: SelectOption[] }
 }) {
   const [details, setDetails] = useState<TitleDetailsResponse | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(true)
@@ -1576,6 +1587,12 @@ function TitleDetailsModal(props: {
   const [seasonMenuOpen, setSeasonMenuOpen] = useState(false)
   const [movieRequestPending, setMovieRequestPending] = useState(false)
   const [movieDeleteBusy, setMovieDeleteBusy] = useState(false)
+  const [qualityPicker, setQualityPicker] = useState<{
+    title: string
+    logoUrl?: string
+    profiles: SelectOption[]
+    onConfirm: (qualityProfileId?: number) => void
+  } | null>(null)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
   const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
@@ -2025,7 +2042,7 @@ function TitleDetailsModal(props: {
       return
     }
 
-    if (movieRequestPending && (details.requestStatus === 'processing' || details.requestStatus === 'downloading')) {
+    if (movieRequestPending && details.requestStatus === 'downloading') {
       setMovieRequestPending(false)
     }
   }, [details, movieRequestPending])
@@ -2037,7 +2054,7 @@ function TitleDetailsModal(props: {
 
     const timeoutId = window.setTimeout(() => {
       setMovieRequestPending(false)
-    }, 15000)
+    }, 5 * 60 * 1000)
 
     return () => {
       window.clearTimeout(timeoutId)
@@ -2137,7 +2154,15 @@ function TitleDetailsModal(props: {
       })
   }
 
-  async function handleSeasonDownload() {
+  function openQualityPicker(
+    title: string,
+    profiles: SelectOption[],
+    onConfirm: (qualityProfileId?: number) => void
+  ) {
+    setQualityPicker({ title, logoUrl, profiles, onConfirm })
+  }
+
+  async function handleSeasonDownload(qualityProfileId?: number) {
     if (typeof activeSeasonNumber !== 'number') {
       return
     }
@@ -2156,9 +2181,10 @@ function TitleDetailsModal(props: {
         await api.requestSeason({
           seriesId: details.sonarrSeriesId,
           seasonNumber: activeSeasonNumber,
+          qualityProfileId,
         }, props.currentUser)
       } else {
-        await props.onRequest(props.card)
+        await props.onRequest(props.card, qualityProfileId)
       }
       await refreshSeasonState(seasonValue || undefined)
     } catch (error) {
@@ -2233,7 +2259,7 @@ function TitleDetailsModal(props: {
     }
   }
 
-  async function handleMovieRequest() {
+  async function handleMovieRequest(qualityProfileId?: number) {
     if (details?.mediaType !== 'movie' || movieRequestStatus === 'processing' || movieRequestStatus === 'downloading') {
       return
     }
@@ -2249,7 +2275,7 @@ function TitleDetailsModal(props: {
       : current)
 
     try {
-      await props.onRequest(props.card)
+      await props.onRequest(props.card, qualityProfileId)
       await refreshSeasonState()
     } catch (error) {
       setMovieRequestPending(false)
@@ -2308,6 +2334,19 @@ function TitleDetailsModal(props: {
       return
     }
 
+    openQualityPicker(
+      `Download ${details?.episodes.find((episode) => episode.id === episodeId)?.title || 'episode'}`,
+      props.qualityProfiles.sonarr,
+      (qualityProfileId) => queueEpisodeDownload(episodeId, sonarrEpisodeId, availability, qualityProfileId)
+    )
+  }
+
+  function queueEpisodeDownload(
+    episodeId: string,
+    sonarrEpisodeId: number,
+    availability: TitleDetailsResponse['episodes'][number]['availability'],
+    qualityProfileId?: number
+  ) {
     setEpisodeDownloadBusyId(episodeId)
     setPendingEpisodeRequestIds((current) => current.includes(episodeId) ? current : [...current, episodeId])
     updateEpisodeInCaches(episodeId, (episode) => ({
@@ -2317,7 +2356,7 @@ function TitleDetailsModal(props: {
       canDownload: false,
     }))
 
-    void api.requestEpisode({ episodeId: sonarrEpisodeId }, props.currentUser)
+    void api.requestEpisode({ episodeId: sonarrEpisodeId, qualityProfileId }, props.currentUser)
       .catch(() => {
         setPendingEpisodeRequestIds((current) => current.filter((id) => id !== episodeId))
         updateEpisodeInCaches(episodeId, (episode) => ({
@@ -2475,7 +2514,11 @@ function TitleDetailsModal(props: {
                             </div>
                           )
                         ) : (
-                          <button className="secondary-button title-action-button" onClick={() => void handleMovieRequest()} type="button">
+                          <button
+                            className="secondary-button title-action-button"
+                            onClick={() => openQualityPicker(displayTitle, props.qualityProfiles.radarr, (qualityProfileId) => void handleMovieRequest(qualityProfileId))}
+                            type="button"
+                          >
                             <DownloadGlyph />
                             <span>Request</span>
                           </button>
@@ -2577,7 +2620,11 @@ function TitleDetailsModal(props: {
                                       aria-label="Download season"
                                       className="title-season-action"
                                       disabled={seasonActionBusy === 'download'}
-                                      onClick={() => void handleSeasonDownload()}
+                                      onClick={() => openQualityPicker(
+                                        `${displayTitle} · ${activeSeasonMeta?.title || 'Season'}`,
+                                        props.qualityProfiles.sonarr,
+                                        (qualityProfileId) => void handleSeasonDownload(qualityProfileId)
+                                      )}
                                       type="button"
                                     >
                                       <DownloadGlyph />
@@ -2795,8 +2842,57 @@ function TitleDetailsModal(props: {
               </div>
             </div>
           ) : null}
+          {qualityPicker ? (
+            <QualityPicker
+              onCancel={() => setQualityPicker(null)}
+              onSelect={(qualityProfileId) => {
+                const request = qualityPicker
+                setQualityPicker(null)
+                request.onConfirm(qualityProfileId)
+              }}
+              profiles={qualityPicker.profiles}
+              logoUrl={qualityPicker.logoUrl}
+              title={qualityPicker.title}
+            />
+          ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+function QualityPicker(props: {
+  title: string
+  logoUrl?: string
+  profiles: SelectOption[]
+  onCancel: () => void
+  onSelect: (qualityProfileId?: number) => void
+}) {
+  return (
+    <div
+      className="quality-picker-backdrop"
+      onClick={(event) => {
+        event.stopPropagation()
+        props.onCancel()
+      }}
+      role="presentation"
+    >
+      <section
+        aria-label={`Select quality for ${props.title}`}
+        aria-modal="true"
+        className="quality-picker"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        {props.logoUrl ? <img alt={props.title} className="quality-picker-logo" src={props.logoUrl} /> : <h3>{props.title}</h3>}
+        <p className="quality-picker-label">Select quality:</p>
+        <div className="quality-picker-options">
+          <button onClick={() => props.onSelect()} type="button">Auto <span>Best version available</span></button>
+          {props.profiles.map((profile) => (
+            <button key={profile.id} onClick={() => props.onSelect(Number(profile.id))} type="button">{profile.label}</button>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
@@ -3017,6 +3113,14 @@ function DownloadsPage(props: {
                 </div>
                 <div className="download-side">
                   <div className="download-progress-panel">
+                    <button
+                      aria-label={`Dismiss ${item.title}`}
+                      className="download-action-button download-delete-button download-history-dismiss-button"
+                      onClick={() => props.onDismissCompleted(item.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
                     <div className="download-progress-header">
                       <span className="download-processing-badge">Processing</span>
                     </div>
@@ -3047,47 +3151,54 @@ function DownloadsPage(props: {
       {props.completedDownloads.length > 0 ? (
         <section className="downloads-section">
           <div className="downloads-section-header">
-            <h3 className="downloads-section-title">Completed</h3>
-            <button className="downloads-dismiss-all-button" onClick={props.onDismissAllCompleted} type="button">
-              Dismiss all
+            <h3 className="downloads-section-title">History</h3>
+            <button aria-label="Dismiss history" className="downloads-dismiss-all-button" onClick={props.onDismissAllCompleted} title="Dismiss history" type="button">
+              ×
             </button>
           </div>
           <div className="downloads-grid">
             {props.completedDownloads.map((item) => (
-              <article className="download-row download-row-completed" key={item.id}>
+              <article className={item.status === 'cancelled' ? 'download-row download-row-cancelled' : 'download-row download-row-completed'} key={item.id}>
+                <button
+                  aria-label={`Dismiss ${item.title}`}
+                  className="download-action-button download-delete-button download-history-dismiss-button"
+                  onClick={() => props.onDismissCompleted(item.id)}
+                  type="button"
+                >
+                  ×
+                </button>
                 <div className="download-card">
                   <div className="download-artwork">
                     {item.posterUrl || item.backdropUrl
-                      ? <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                      ? (
+                        <picture>
+                          {item.posterUrl ? <source media="(max-width: 980px)" srcSet={item.posterUrl} /> : null}
+                          <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                        </picture>
+                      )
                       : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
                   </div>
                   <div className="download-copy">
                     <h4>{item.title}</h4>
                     {item.subtitle ? <p className="download-subtitle">{item.subtitle}</p> : null}
-                    <p className="download-detail download-completed-label">Download completed</p>
+                    <p className="download-detail download-completed-label">{item.status === 'cancelled' ? 'Download cancelled' : 'Download completed'}</p>
                   </div>
                 </div>
-                <div className="download-side">
-                  <div className="download-progress-panel">
-                    <div className="download-progress-header">
-                      <strong className="download-completed-badge">100%</strong>
-                      <span>Completed</span>
-                    </div>
-                    <div className="download-progress-row">
-                      <div className="download-progress-bar download-progress-complete">
-                        <div className="download-progress-fill" style={{ width: '100%' }} />
+                {item.status === 'completed' ? (
+                  <div className="download-side">
+                    <div className="download-progress-panel">
+                      <div className="download-progress-header">
+                        <strong className="download-completed-badge">100%</strong>
+                        <span>Completed</span>
                       </div>
-                      <button
-                        aria-label={`Dismiss ${item.title}`}
-                        className="download-action-button download-delete-button"
-                        onClick={() => props.onDismissCompleted(item.id)}
-                        type="button"
-                      >
-                        ×
-                      </button>
+                      <div className="download-progress-row">
+                        <div className="download-progress-bar download-progress-complete">
+                          <div className="download-progress-fill" style={{ width: '100%' }} />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -3469,6 +3580,14 @@ function SettingsView(props: {
           onApiKeyChange={(apiKey) => props.updateConfig('sonarr', { ...props.config.sonarr, apiKey })}
           onBaseUrlChange={(baseUrl) => props.updateConfig('sonarr', { ...props.config.sonarr, baseUrl })}
         />
+        <QualityProfileVisibility
+          profiles={props.options.sonarrQualityProfiles}
+          selectedProfileIds={props.config.preferences.sonarrDownloadQualityProfileIds}
+          onChange={(sonarrDownloadQualityProfileIds) => props.updateConfig('preferences', {
+            ...props.config.preferences,
+            sonarrDownloadQualityProfileIds,
+          })}
+        />
       </SettingsCard>
 
       <SettingsCard title="Radarr">
@@ -3477,6 +3596,14 @@ function SettingsView(props: {
           baseUrl={props.config.radarr.baseUrl}
           onApiKeyChange={(apiKey) => props.updateConfig('radarr', { ...props.config.radarr, apiKey })}
           onBaseUrlChange={(baseUrl) => props.updateConfig('radarr', { ...props.config.radarr, baseUrl })}
+        />
+        <QualityProfileVisibility
+          profiles={props.options.radarrQualityProfiles}
+          selectedProfileIds={props.config.preferences.radarrDownloadQualityProfileIds}
+          onChange={(radarrDownloadQualityProfileIds) => props.updateConfig('preferences', {
+            ...props.config.preferences,
+            radarrDownloadQualityProfileIds,
+          })}
         />
       </SettingsCard>
 
@@ -3529,6 +3656,38 @@ function ServiceFields(props: {
         <input className="input" onChange={(event) => props.onApiKeyChange(event.target.value)} value={props.apiKey} />
       </label>
     </>
+  )
+}
+
+function QualityProfileVisibility(props: {
+  profiles: SelectOption[]
+  selectedProfileIds: string[]
+  onChange: (profileIds: string[]) => void
+}) {
+  return (
+    <fieldset className="quality-profile-visibility">
+      <legend>Profiles shown when downloading</legend>
+      <p>Auto is always available. Select the quality profiles users can choose.</p>
+      {props.profiles.length ? (
+        <div className="quality-profile-visibility-list">
+          {props.profiles.map((profile) => {
+            const checked = props.selectedProfileIds.includes(profile.id)
+            return (
+              <label key={profile.id}>
+                <input
+                  checked={checked}
+                  onChange={() => props.onChange(checked
+                    ? props.selectedProfileIds.filter((id) => id !== profile.id)
+                    : [...props.selectedProfileIds, profile.id])}
+                  type="checkbox"
+                />
+                <span>{profile.label}</span>
+              </label>
+            )
+          })}
+        </div>
+      ) : <p>Save the service connection first to load its quality profiles.</p>}
+    </fieldset>
   )
 }
 
