@@ -127,10 +127,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ tmdbId, user, qualityProfileId }),
     }),
-  requestSeries: (tmdbId: number, user: string | null, qualityProfileId?: number) =>
+  requestSeries: (tmdbId: number, user: string | null, qualityProfileId?: number, seasonNumber?: number) =>
     request<{ ok: boolean }>('/api/requests/series', {
       method: 'POST',
-      body: JSON.stringify({ tmdbId, user, qualityProfileId }),
+      body: JSON.stringify({ tmdbId, user, qualityProfileId, seasonNumber }),
     }),
   requestSeason: (payload: SeasonRequestPayload, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/season', {

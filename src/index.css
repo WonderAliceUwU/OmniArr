@@ -562,6 +562,7 @@ img {
 .notice {
   background: rgba(97, 239, 171, 0.14);
   color: #91f5c4;
+  display: none;
 }
 
 .error-banner {
@@ -3021,6 +3022,99 @@ img {
   flex: 0 0 auto;
 }
 
+.downloads-header {
+  position: relative;
+}
+
+.downloads-selection-toggle {
+  position: absolute;
+  top: 50%;
+  right: 2.35rem;
+  display: inline-grid;
+  box-sizing: border-box;
+  width: auto;
+  height: 2.2rem;
+  min-height: 0;
+  padding: 0.35rem 0.75rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dfe7f5;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  transform: translateY(-50%);
+}
+
+.downloads-selection-toggle.is-active {
+  border-color: rgba(104, 171, 255, 0.65);
+  background: rgba(104, 171, 255, 0.16);
+  color: #cce1ff;
+}
+
+.downloads-selection-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 2.35rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(104, 171, 255, 0.18);
+  border-radius: 0.9rem;
+  background: rgba(104, 171, 255, 0.08);
+  color: #c8d5ea;
+  font-size: 0.84rem;
+}
+
+.downloads-selection-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.downloads-selection-toolbar button {
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.09);
+  color: #f0f5ff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.download-row.is-selecting {
+  position: relative;
+  border-color: rgba(104, 171, 255, 0.3);
+}
+
+.download-selection-check {
+  position: absolute;
+  z-index: 3;
+  top: 0.65rem;
+  right: 0.65rem;
+  display: grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(9, 11, 16, 0.8);
+  color: #07111e;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.download-selection-check.is-selected {
+  border-color: #7ab7ff;
+  background: #7ab7ff;
+}
+
 .search-header p {
   margin: 0.35rem 0 0;
   color: #95a2ba;
@@ -3177,6 +3271,12 @@ img {
   object-fit: cover;
 }
 
+.calendar-entry-art picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .calendar-entry-copy {
   display: grid;
   align-content: center;
@@ -3227,6 +3327,159 @@ img {
 
 .calendar-entry-detail {
   color: #93a0b9;
+}
+
+/* The calendar's desktop rules are declared last, so keep the mobile layout here. */
+@media (max-width: 980px) {
+  .calendar-page {
+    gap: 1rem;
+    height: auto;
+    min-height: 100%;
+    padding: calc(env(safe-area-inset-top, 0px) + 1rem) 1rem 1rem;
+  }
+
+  .calendar-header {
+    gap: 1rem;
+    padding: 0;
+  }
+
+  .calendar-container {
+    flex: none;
+    padding: 0.7rem;
+    border-radius: 1.1rem;
+  }
+
+  .calendar-scroll-container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .calendar-group-header {
+    padding: 0 0.3rem;
+  }
+
+  .calendar-entry-card {
+    grid-template-columns: 4.8rem minmax(0, 1fr);
+    grid-template-areas:
+      'art copy'
+      'art time';
+    gap: 0.35rem 0.75rem;
+    align-items: start;
+    padding: 0.65rem;
+    border-radius: 1rem;
+  }
+
+  .calendar-entry-art {
+    grid-area: art;
+    order: initial;
+    aspect-ratio: 2 / 3;
+    border-radius: 0.7rem;
+  }
+
+  .calendar-entry-copy {
+    grid-area: copy;
+    align-content: start;
+    gap: 0.25rem;
+    padding-top: 0.1rem;
+  }
+
+  .calendar-entry-copy h4 {
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .calendar-entry-subtitle,
+  .calendar-entry-detail {
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+
+  .calendar-entry-time {
+    grid-area: time;
+    justify-items: start;
+    align-content: end;
+    padding-top: 0;
+  }
+
+  .calendar-entry-time span {
+    min-height: 0;
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 980px) {
+  .calendar-page {
+    gap: 1rem;
+    height: auto;
+    min-height: 100%;
+    padding: calc(env(safe-area-inset-top, 0px) + 1rem) 1rem 1rem;
+  }
+
+  .calendar-header {
+    gap: 1rem;
+    padding: 0;
+  }
+
+  .calendar-container {
+    flex: none;
+    padding: 0.7rem;
+    border-radius: 1.1rem;
+  }
+
+  .calendar-scroll-container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .calendar-group-header {
+    padding: 0 0.3rem;
+  }
+
+  .calendar-entry-card {
+    grid-template-columns: 4.8rem minmax(0, 1fr);
+    grid-template-areas:
+      'art copy'
+      'art time';
+    gap: 0.35rem 0.75rem;
+    align-items: start;
+    padding: 0.65rem;
+    border-radius: 1rem;
+  }
+
+  .calendar-entry-art {
+    grid-area: art;
+    aspect-ratio: 2 / 3;
+    border-radius: 0.7rem;
+  }
+
+  .calendar-entry-copy {
+    grid-area: copy;
+    align-content: start;
+    gap: 0.25rem;
+    padding-top: 0.1rem;
+  }
+
+  .calendar-entry-copy h4 {
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .calendar-entry-subtitle,
+  .calendar-entry-detail {
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+
+  .calendar-entry-time {
+    grid-area: time;
+    justify-items: start;
+    align-content: end;
+  }
+
+  .calendar-entry-time span {
+    min-height: 0;
+    font-size: 1rem;
+  }
 }
 
 .downloads-section {
@@ -3306,6 +3559,86 @@ img {
 .empty-state p {
   margin: 0;
   color: #9ca4b8;
+}
+
+.downloads-empty-section {
+  display: grid;
+  min-height: clamp(14rem, 44svh, 28rem);
+  place-items: center;
+}
+
+.downloads-empty-state {
+  display: grid;
+  justify-items: center;
+  max-width: 28rem;
+  gap: 0.45rem;
+  text-align: center;
+}
+
+.downloads-empty-state h4,
+.downloads-empty-state p {
+  margin: 0;
+}
+
+.downloads-empty-state h4 {
+  color: #eef4ff;
+  font-size: 1.15rem;
+}
+
+.downloads-empty-state p {
+  color: #9ca4b8;
+}
+
+.downloads-empty-icon {
+  position: relative;
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-bottom: 0.35rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.045);
+  color: #c5cede;
+}
+
+.downloads-empty-icon .title-action-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.downloads-empty-icon span {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  box-sizing: border-box;
+  width: 1.2rem;
+  height: 1.2rem;
+  border: 2px solid #000;
+  border-radius: 999px;
+  background: #7e8798;
+  transform: translate(35%, -35%);
+}
+
+.downloads-empty-icon span::before,
+.downloads-empty-icon span::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: #10131a;
+}
+
+.downloads-empty-icon span::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.downloads-empty-icon span::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .download-subtitle {
@@ -3671,12 +4004,20 @@ img {
 }
 
 .loading-orb {
-  width: 4rem;
-  height: 4rem;
+  width: 3rem;
+  height: 3rem;
+  box-sizing: border-box;
   border-radius: 999px;
-  background: radial-gradient(circle, #ffd166 0%, #ff8d4d 50%, rgba(255, 141, 77, 0) 70%);
-  filter: blur(4px);
-  animation: pulse 1.8s ease-in-out infinite;
+  border: 3px solid rgba(238, 244, 255, 0.16);
+  border-top-color: #eef4ff;
+  border-right-color: rgba(104, 171, 255, 0.8);
+  animation: loading-spinner 720ms linear infinite;
+}
+
+@keyframes loading-spinner {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-placeholder {
@@ -5231,4 +5572,120 @@ img {
 
 .calendar-entry-detail {
   color: #93a0b9;
+}
+
+/* Mobile overrides must come after the desktop calendar component styles. */
+@media (max-width: 980px) {
+  .mobile-menu-toggle {
+    top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.15rem));
+  }
+
+  .calendar-page {
+    gap: 1rem;
+    height: auto;
+    min-height: 100%;
+    padding: calc(env(safe-area-inset-top, 0px) + 1rem) 1rem 1rem;
+  }
+
+  .calendar-header {
+    gap: 1rem;
+    min-height: 2.9rem;
+    padding: 0;
+  }
+
+  .downloads-header {
+    display: grid;
+    box-sizing: border-box;
+    height: 2.9rem;
+    min-height: 2.9rem;
+    margin-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+    padding: 0 4.75rem;
+    position: relative;
+    top: 0;
+    place-items: center;
+  }
+
+  .downloads-selection-toggle {
+    top: 0;
+    bottom: 0;
+    right: 1rem;
+    margin-block: auto;
+    transform: none;
+  }
+
+  .downloads-selection-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 0 1rem;
+  }
+
+  .downloads-selection-toolbar > div {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .calendar-container {
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .calendar-scroll-container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .calendar-group-header {
+    padding: 0 0.3rem;
+  }
+
+  .calendar-entry-card {
+    grid-template-columns: 4.8rem minmax(0, 1fr);
+    grid-template-areas:
+      'art copy'
+      'art time';
+    gap: 0.35rem 0.75rem;
+    align-items: start;
+    padding: 0.65rem;
+    border-radius: 1rem;
+  }
+
+  .calendar-entry-art {
+    grid-area: art;
+    order: initial;
+    aspect-ratio: 2 / 3;
+    border-radius: 0.7rem;
+  }
+
+  .calendar-entry-copy {
+    grid-area: copy;
+    align-content: start;
+    gap: 0.25rem;
+    padding-top: 0.1rem;
+  }
+
+  .calendar-entry-copy h4 {
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .calendar-entry-subtitle,
+  .calendar-entry-detail {
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+
+  .calendar-entry-time {
+    grid-area: time;
+    justify-items: start;
+    align-content: end;
+    padding-top: 0;
+  }
+
+  .calendar-entry-time span {
+    min-height: 0;
+    font-size: 1rem;
+  }
 }

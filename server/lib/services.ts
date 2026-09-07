@@ -299,6 +299,7 @@ interface SonarrSeriesRecord {
   title?: string;
   tmdbId?: number;
   tvdbId?: number;
+  images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
   seasons?: Array<{
     seasonNumber?: number;
     monitored?: boolean;
@@ -2653,7 +2654,13 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
   });
 }
 
-export async function requestSeries(config: AppConfig, tmdbId: number, user: string | null, qualityProfileId?: number): Promise<void> {
+export async function requestSeries(
+  config: AppConfig,
+  tmdbId: number,
+  user: string | null,
+  qualityProfileId?: number,
+  seasonNumber?: number
+): Promise<void> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
     throw new Error('Sonarr is not configured.');
   }
@@ -2675,13 +2682,16 @@ export async function requestSeries(config: AppConfig, tmdbId: number, user: str
   addProcessingItem({
     source: 'sonarr',
     title: String(details.name || details.original_name || 'Series'),
-    subtitle: 'All seasons',
+    subtitle: typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : 'All seasons',
     tmdbId,
+    posterUrl: typeof details.poster_path === 'string' && details.poster_path
+      ? `${TMDB_IMAGE}/w342${details.poster_path}`
+      : undefined,
     mediaType: 'series',
     user: user || 'Unknown',
   });
 
-  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series`, {
+  const series = await fetchJson<SonarrSeriesRecord>(`${config.sonarr.baseUrl}/api/v3/series`, {
     method: 'POST',
     headers: {
       'X-Api-Key': config.sonarr.apiKey,
@@ -2696,12 +2706,52 @@ export async function requestSeries(config: AppConfig, tmdbId: number, user: str
       seasonFolder: true,
       monitored: config.sonarr.monitor !== 'none',
       addOptions: {
-        monitor: config.sonarr.monitor,
-        searchForMissingEpisodes: true,
-        searchForCutoffUnmetEpisodes: true
+        monitor: typeof seasonNumber === 'number' ? 'none' : config.sonarr.monitor,
+        searchForMissingEpisodes: typeof seasonNumber !== 'number',
+        searchForCutoffUnmetEpisodes: typeof seasonNumber !== 'number'
       }
     })
   });
+
+  if (typeof seasonNumber !== 'number') {
+    return
+  }
+
+  if (!series?.id) {
+    throw new Error('Sonarr did not return the added series.')
+  }
+
+  const seasons = (series.seasons || []).map((season) =>
+    season.seasonNumber === seasonNumber
+      ? { ...season, monitored: true }
+      : { ...season, monitored: false }
+  )
+  if (!seasons.some((season) => season.seasonNumber === seasonNumber)) {
+    throw new Error(`Season ${seasonNumber} was not found in Sonarr.`)
+  }
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(series.id))}`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ ...series, seasons })
+  })
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
+    method: 'POST',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'SeasonSearch',
+      seriesId: series.id,
+      seasonNumber,
+      qualityProfileId
+    })
+  })
 
 }
 
@@ -2760,6 +2810,7 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
     title: series.title || 'Series',
     subtitle: `Season ${payload.seasonNumber}`,
     tmdbId: series.tmdbId,
+    posterUrl: extractRemoteImage(series.images),
     mediaType: 'tv',
     user: user || 'Unknown',
   });

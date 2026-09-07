@@ -398,8 +398,8 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/requests/series' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<{ tmdbId: number; user: string | null; qualityProfileId?: number }>(request);
-    await requestSeries(config, Number(body.tmdbId), body.user, Number(body.qualityProfileId) || undefined);
+    const body = await readJson<{ tmdbId: number; user: string | null; qualityProfileId?: number; seasonNumber?: number }>(request);
+    await requestSeries(config, Number(body.tmdbId), body.user, Number(body.qualityProfileId) || undefined, Number(body.seasonNumber) || undefined);
     sendJson(response, 200, { ok: true });
     return;
   }
