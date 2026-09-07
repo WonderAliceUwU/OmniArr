@@ -297,6 +297,10 @@ export interface SeasonDeletePayload {
   seasonNumber: number;
 }
 
+export interface MovieDeletePayload {
+  movieId: number;
+}
+
 export interface HubSection {
   id: string;
   title: string;

@@ -1575,6 +1575,7 @@ function TitleDetailsModal(props: {
   const [seasonActionBusy, setSeasonActionBusy] = useState<'download' | 'delete' | null>(null)
   const [seasonMenuOpen, setSeasonMenuOpen] = useState(false)
   const [movieRequestPending, setMovieRequestPending] = useState(false)
+  const [movieDeleteBusy, setMovieDeleteBusy] = useState(false)
   const [playerTarget, setPlayerTarget] = useState<{ id: string; title: string } | null>(null)
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false)
   const [episodeScrollState, setEpisodeScrollState] = useState({ canScrollLeft: false, canScrollRight: false })
@@ -1889,6 +1890,7 @@ function TitleDetailsModal(props: {
     : details?.requestStatus || 'idle'
   const movieRequestProgress = details?.requestProgress || 0
   const isMovieRequestActive = details?.mediaType === 'movie' && (movieRequestStatus === 'processing' || movieRequestStatus === 'downloading')
+  const canDeleteMovieAction = Boolean(details?.mediaType === 'movie' && details.radarrMovieId)
   const activeSeasonNumber = effectiveActiveSeasonMeta?.seasonNumber
   const activeSeasonDownloadStatus = effectiveActiveSeasonMeta?.downloadStatus || 'idle'
   const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
@@ -2262,6 +2264,37 @@ function TitleDetailsModal(props: {
     }
   }
 
+  async function handleMovieDelete() {
+    if (!details?.radarrMovieId) {
+      return
+    }
+
+    if (!window.confirm(`Delete ${displayTitle} from Radarr and remove its downloaded files?`)) {
+      return
+    }
+
+    setMovieDeleteBusy(true)
+    setDetailsError('')
+    try {
+      await api.deleteMovie({ movieId: details.radarrMovieId })
+      setDetails((current) => current && current.mediaType === 'movie'
+        ? {
+            ...current,
+            availableInJellyfin: false,
+            providerId: undefined,
+            playTargetId: undefined,
+            radarrMovieId: undefined,
+            requestStatus: 'idle',
+            requestProgress: undefined,
+          }
+        : current)
+    } catch (error) {
+      setDetailsError(error instanceof Error ? error.message : 'Failed to delete movie files.')
+    } finally {
+      setMovieDeleteBusy(false)
+    }
+  }
+
   function handleEpisodeDownload(
     event: MouseEvent<HTMLButtonElement>,
     episodeId: string,
@@ -2365,12 +2398,24 @@ function TitleDetailsModal(props: {
                       <h2 className="title-details-title">{displayTitle}</h2>
                     )}
                   </div>
-                  {canPlay ? (
-                    <ActionButton className="title-mobile-summary-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
-                      <PlayGlyph />
-                      <span>Play</span>
-                    </ActionButton>
-                  ) : null}
+                  <div className="title-mobile-summary-actions">
+                    {canPlay ? (
+                      <ActionButton className="title-mobile-summary-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
+                        <PlayGlyph />
+                        <span>Play</span>
+                      </ActionButton>
+                    ) : null}
+                    {canDeleteMovieAction ? (
+                      <ActionButton
+                        aria-label="Delete movie files"
+                        className="title-mobile-summary-delete title-action-button-delete"
+                        disabled={movieDeleteBusy}
+                        onClick={() => void handleMovieDelete()}
+                      >
+                        <TrashGlyph />
+                      </ActionButton>
+                    ) : null}
+                  </div>
                   <div className="title-details-summary-content">
                     <p className="title-details-overview">
                       {isOverviewExpanded ? displayOverview : truncatedOverview}
@@ -2393,7 +2438,18 @@ function TitleDetailsModal(props: {
                           <PlayGlyph />
                           <span>Play</span>
                         </ActionButton>
-                      ) : canRequest && details?.mediaType !== 'series' ? (
+                      ) : null}
+                      {canDeleteMovieAction ? (
+                        <ActionButton
+                          aria-label="Delete movie files"
+                          className="title-summary-header-delete title-action-button-delete"
+                          disabled={movieDeleteBusy}
+                          onClick={() => void handleMovieDelete()}
+                        >
+                          <TrashGlyph />
+                        </ActionButton>
+                      ) : null}
+                      {!canPlay && canRequest && details?.mediaType !== 'series' ? (
                         isMovieRequestActive ? (
                           movieRequestStatus === 'downloading' ? (
                             <div

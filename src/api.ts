@@ -10,6 +10,7 @@ import type {
   HubPageResponse,
   JellyfinLoginPayload,
   MediaCard,
+  MovieDeletePayload,
   SearchResponse,
   ServiceOptionsResponse,
   SessionResponse,
@@ -143,6 +144,11 @@ body: JSON.stringify({ tmdbId, user }),
     }),
   deleteSeason: (payload: SeasonDeletePayload) =>
     request<{ ok: boolean }>('/api/seasons/delete', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteMovie: (payload: MovieDeletePayload) =>
+    request<{ ok: boolean }>('/api/movies/delete', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

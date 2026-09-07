@@ -1915,6 +1915,23 @@ img {
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+.title-action-button-delete {
+  justify-content: center;
+  width: 2.5rem;
+  min-width: 0;
+  height: 2.75rem;
+  padding: 0;
+  color: #f3f6ff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.title-action-button-delete:hover,
+.title-action-button-delete:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .title-seasons-panel {
   display: grid;
   gap: 1.3rem;
@@ -2099,7 +2116,9 @@ img {
 }
 
 .mobile-season-select,
-.title-mobile-summary-play {
+.title-mobile-summary-actions,
+.title-mobile-summary-play,
+.title-mobile-summary-delete {
   display: none;
 }
 
@@ -4310,10 +4329,17 @@ img {
     text-align: center;
   }
 
-  .title-mobile-summary-play {
+  .title-mobile-summary-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.65rem;
+    margin-top: 0.1rem;
+  }
+
+  .title-mobile-summary-play,
+  .title-mobile-summary-delete {
     display: inline-flex;
     justify-self: center;
-    margin-top: 0.1rem;
   }
 
   .title-summary-header-play,

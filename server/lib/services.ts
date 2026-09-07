@@ -13,6 +13,7 @@ import type {
   HubPageResponse,
   HubSection,
   MediaCard,
+  MovieDeletePayload,
   ProcessingItem,
   SeasonDeletePayload,
   SeasonRequestPayload,
@@ -2738,6 +2739,35 @@ export async function deleteSeasonFiles(config: AppConfig, payload: SeasonDelete
       })
     )
   );
+}
+
+export async function deleteMovieFiles(config: AppConfig, payload: MovieDeletePayload): Promise<void> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey) {
+    throw new Error('Radarr is not configured.');
+  }
+
+  if (!payload.movieId) {
+    throw new Error('Movie id is required.');
+  }
+
+  const baseUrl = config.radarr.baseUrl.endsWith('/') ? config.radarr.baseUrl : `${config.radarr.baseUrl}/`;
+  const movieUrl = new URL(`api/v3/movie/${encodeURIComponent(String(payload.movieId))}`, baseUrl);
+  movieUrl.searchParams.set('deleteFiles', 'true');
+  movieUrl.searchParams.set('addImportExclusion', 'false');
+
+  const response = await fetch(movieUrl, {
+    method: 'DELETE',
+    headers: {
+      'X-Api-Key': config.radarr.apiKey
+    }
+  });
+
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    throw new Error(detail
+      ? `Radarr ${response.status} ${response.statusText}: ${detail}`
+      : `Radarr ${response.status} ${response.statusText}`);
+  }
 }
 
 export async function setEpisodeWatchState(config: AppConfig, payload: EpisodeWatchStateRequest): Promise<void> {
