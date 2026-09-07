@@ -37,6 +37,7 @@ const PROCESSING_TTL_MS = 60 * 60 * 1000; // 1 hour max
 const processingQueue: ProcessingItem[] = [];
 const completedDownloads: CompletedDownloadItem[] = [];
 let previousDownloadIds = new Set<string>();
+const cancelledDownloadIds = new Set<string>();
 
 export function addProcessingItem(item: Omit<ProcessingItem, 'id' | 'createdAt'>): void {
   const id = `proc-${item.source}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,6 +74,7 @@ function detectCompletedDownloads(currentDownloads: DownloadItem[]): void {
   // Items that were downloading before but are no longer in the queue = completed
   for (const prevId of previousDownloadIds) {
     if (!currentIds.has(prevId)) {
+      const wasCancelled = cancelledDownloadIds.delete(prevId);
       // Find the item info from the last known state — we stored it below
       const cached = lastKnownDownloads.get(prevId);
       if (cached) {
@@ -85,6 +87,7 @@ function detectCompletedDownloads(currentDownloads: DownloadItem[]): void {
           backdropUrl: cached.backdropUrl,
           tmdbId: cached.tmdbId,
           mediaType: cached.mediaType,
+          status: wasCancelled ? 'cancelled' : 'completed',
           completedAt: new Date().toISOString(),
         });
       }
@@ -371,7 +374,13 @@ export function sanitizeConfig(input: AppConfig): AppConfig {
       language: input.preferences.language.trim() || 'en-US',
       region: input.preferences.region.trim().toUpperCase(),
       excludeLibraryItems: Boolean(input.preferences.excludeLibraryItems),
-      animationLevel: input.preferences.animationLevel === 'reduced' ? 'reduced' : 'smooth'
+      animationLevel: input.preferences.animationLevel === 'reduced' ? 'reduced' : 'smooth',
+      sonarrDownloadQualityProfileIds: Array.isArray(input.preferences.sonarrDownloadQualityProfileIds)
+        ? input.preferences.sonarrDownloadQualityProfileIds.map(String)
+        : [],
+      radarrDownloadQualityProfileIds: Array.isArray(input.preferences.radarrDownloadQualityProfileIds)
+        ? input.preferences.radarrDownloadQualityProfileIds.map(String)
+        : []
     },
     jellyfin: {
       baseUrl: normalizeBaseUrl(input.jellyfin.baseUrl),
@@ -844,6 +853,9 @@ export async function removeDownload(config: AppConfig, id: string): Promise<voi
     throw new Error(`${source === 'sonarr' ? 'Sonarr' : 'Radarr'} is not configured.`);
   }
 
+  const queue = source === 'sonarr' ? await getSonarrQueue(config) : await getRadarrQueue(config);
+  const queueItem = queue.find((item) => String(item.id) === rawId);
+
   const response = await fetch(
     `${baseUrl}/api/v3/queue/${encodeURIComponent(rawId)}?removeFromClient=true&blocklist=false&skipRedownload=false`,
     {
@@ -856,6 +868,86 @@ export async function removeDownload(config: AppConfig, id: string): Promise<voi
 
   if (!response.ok) {
     throw new Error(`${source === 'sonarr' ? 'Sonarr' : 'Radarr'} ${response.status} ${response.statusText}`);
+  }
+
+  cancelledDownloadIds.add(id);
+
+  if (source === 'radarr' && queueItem) {
+    const movieId = (queueItem as RadarrQueueRecord).movie?.id;
+    const title = (queueItem as RadarrQueueRecord).movie?.title || queueItem.title;
+    if (title) {
+      removeProcessingItem('radarr', title);
+    }
+    if (movieId) {
+      await removeRadarrMovieIfEmpty(config, movieId, queue as RadarrQueueRecord[], rawId);
+    }
+  }
+
+  if (source === 'sonarr' && queueItem) {
+    const seriesId = (queueItem as SonarrQueueRecord).seriesId;
+    const title = (queueItem as SonarrQueueRecord).series?.title || queueItem.title;
+    if (title) {
+      removeProcessingItem('sonarr', title);
+    }
+    if (seriesId) {
+      await removeSonarrSeriesIfEmpty(config, seriesId, queue as SonarrQueueRecord[], rawId);
+    }
+  }
+}
+
+function removeProcessingItem(source: ProcessingItem['source'], title: string): void {
+  for (let index = processingQueue.length - 1; index >= 0; index--) {
+    if (processingQueue[index].source === source && processingQueue[index].title.toLowerCase() === title.toLowerCase()) {
+      processingQueue.splice(index, 1);
+    }
+  }
+}
+
+async function removeRadarrMovieIfEmpty(
+  config: AppConfig,
+  movieId: number,
+  queue: RadarrQueueRecord[],
+  cancelledQueueId: string
+): Promise<void> {
+  if (queue.some((item) => String(item.id) !== cancelledQueueId && item.movie?.id === movieId)) {
+    return;
+  }
+
+  const movie = await getRadarrMovieById(config, movieId);
+  if (!movie || movie.hasFile) {
+    return;
+  }
+
+  const response = await fetch(
+    `${config.radarr.baseUrl}/api/v3/movie/${encodeURIComponent(String(movieId))}?deleteFiles=false&addImportExclusion=false`,
+    { method: 'DELETE', headers: { 'X-Api-Key': config.radarr.apiKey } }
+  );
+  if (!response.ok) {
+    throw new Error(`Radarr ${response.status} ${response.statusText}`);
+  }
+}
+
+async function removeSonarrSeriesIfEmpty(
+  config: AppConfig,
+  seriesId: number,
+  queue: SonarrQueueRecord[],
+  cancelledQueueId: string
+): Promise<void> {
+  if (queue.some((item) => String(item.id) !== cancelledQueueId && item.seriesId === seriesId)) {
+    return;
+  }
+
+  const files = await getSonarrEpisodeFilesBySeriesId(config, seriesId);
+  if (files.length) {
+    return;
+  }
+
+  const response = await fetch(
+    `${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(seriesId))}?deleteFiles=false`,
+    { method: 'DELETE', headers: { 'X-Api-Key': config.sonarr.apiKey } }
+  );
+  if (!response.ok) {
+    throw new Error(`Sonarr ${response.status} ${response.statusText}`);
   }
 }
 
@@ -1883,6 +1975,21 @@ async function getRadarrMovieRecord(config: AppConfig, tmdbId: number): Promise<
   }
 }
 
+async function getRadarrMovieById(config: AppConfig, movieId: number): Promise<RadarrMovieRecord | null> {
+  if (!config.radarr.baseUrl || !config.radarr.apiKey || !movieId) {
+    return null;
+  }
+
+  try {
+    return await fetchJson<RadarrMovieRecord>(
+      `${config.radarr.baseUrl}/api/v3/movie/${encodeURIComponent(String(movieId))}`,
+      { headers: { 'X-Api-Key': config.radarr.apiKey } }
+    );
+  } catch {
+    return null;
+  }
+}
+
 async function resolveSonarrRequestConfig(config: AppConfig): Promise<{
   rootFolderPath: string;
   qualityProfileId: number;
@@ -2459,7 +2566,7 @@ function mapJellyfinEpisode(episode: JellyfinItem): TitleDetailsEpisode {
   };
 }
 
-export async function requestMovie(config: AppConfig, tmdbId: number, user: string | null): Promise<void> {
+export async function requestMovie(config: AppConfig, tmdbId: number, user: string | null, qualityProfileId?: number): Promise<void> {
   if (!config.radarr.baseUrl || !config.radarr.apiKey) {
     throw new Error('Radarr is not configured.');
   }
@@ -2487,7 +2594,7 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
         },
         body: JSON.stringify({
           title: details.title || details.original_title || 'Movie',
-          qualityProfileId: radarrRequestConfig.qualityProfileId,
+          qualityProfileId: qualityProfileId || radarrRequestConfig.qualityProfileId,
           rootFolderPath: radarrRequestConfig.rootFolderPath,
           tmdbId: details.id,
           year: Number(String(details.release_date || '').slice(0, 4)) || 0,
@@ -2530,7 +2637,8 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
     },
     body: JSON.stringify({
       name: 'MoviesSearch',
-      movieIds: [movie.id]
+      movieIds: [movie.id],
+      qualityProfileId
     })
   });
 
@@ -2545,7 +2653,7 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
   });
 }
 
-export async function requestSeries(config: AppConfig, tmdbId: number, user: string | null): Promise<void> {
+export async function requestSeries(config: AppConfig, tmdbId: number, user: string | null, qualityProfileId?: number): Promise<void> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
     throw new Error('Sonarr is not configured.');
   }
@@ -2582,7 +2690,7 @@ export async function requestSeries(config: AppConfig, tmdbId: number, user: str
     body: JSON.stringify({
       title: details.name || details.original_name || 'Series',
       tvdbId,
-      qualityProfileId: sonarrRequestConfig.qualityProfileId,
+      qualityProfileId: qualityProfileId || sonarrRequestConfig.qualityProfileId,
       languageProfileId: sonarrRequestConfig.languageProfileId,
       rootFolderPath: sonarrRequestConfig.rootFolderPath,
       seasonFolder: true,
@@ -2642,7 +2750,8 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
     body: JSON.stringify({
       name: 'SeasonSearch',
       seriesId: payload.seriesId,
-      seasonNumber: payload.seasonNumber
+      seasonNumber: payload.seasonNumber,
+      qualityProfileId: payload.qualityProfileId
     })
   });
 
@@ -2673,7 +2782,8 @@ export async function requestEpisode(config: AppConfig, payload: EpisodeRequestP
     },
     body: JSON.stringify({
       name: 'EpisodeSearch',
-      episodeIds: [payload.episodeId]
+      episodeIds: [payload.episodeId],
+      qualityProfileId: payload.qualityProfileId
     })
   });
 

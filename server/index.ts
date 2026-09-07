@@ -390,16 +390,16 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/requests/movie' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<{ tmdbId: number; user: string | null }>(request);
-    await requestMovie(config, Number(body.tmdbId), body.user);
+    const body = await readJson<{ tmdbId: number; user: string | null; qualityProfileId?: number }>(request);
+    await requestMovie(config, Number(body.tmdbId), body.user, Number(body.qualityProfileId) || undefined);
     sendJson(response, 200, { ok: true });
     return;
   }
 
   if (url.pathname === '/api/requests/series' && method === 'POST') {
     const config = await readConfig(session!.encryptionKey);
-    const body = await readJson<{ tmdbId: number; user: string | null }>(request);
-    await requestSeries(config, Number(body.tmdbId), body.user);
+    const body = await readJson<{ tmdbId: number; user: string | null; qualityProfileId?: number }>(request);
+    await requestSeries(config, Number(body.tmdbId), body.user, Number(body.qualityProfileId) || undefined);
     sendJson(response, 200, { ok: true });
     return;
   }
