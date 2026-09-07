@@ -340,7 +340,7 @@ function App() {
     }
   }
 
-  async function handleRequest(card: MediaCard, qualityProfileId?: number) {
+  async function handleRequest(card: MediaCard, qualityProfileId?: number, seasonNumber?: number) {
     if (!card.tmdbId) return
 
     setBusy(true)
@@ -350,7 +350,7 @@ function App() {
       if (card.mediaType === 'movie') {
         await api.requestMovie(card.tmdbId, currentJellyfinUser, qualityProfileId)
       } else {
-        await api.requestSeries(card.tmdbId, currentJellyfinUser, qualityProfileId)
+        await api.requestSeries(card.tmdbId, currentJellyfinUser, qualityProfileId, seasonNumber)
       }
       if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
         await loadHub(route as HubPageResponse['page'], { silent: true })
@@ -1571,7 +1571,7 @@ function TitleDetailsModal(props: {
   config: AppConfig
   onClose: () => void
   originRect: ModalOriginRect | null
-  onRequest: (card: MediaCard, qualityProfileId?: number) => Promise<void>
+  onRequest: (card: MediaCard, qualityProfileId?: number, seasonNumber?: number) => Promise<void>
   currentUser: string | null
   qualityProfiles: { sonarr: SelectOption[]; radarr: SelectOption[] }
 }) {
@@ -2184,7 +2184,7 @@ function TitleDetailsModal(props: {
           qualityProfileId,
         }, props.currentUser)
       } else {
-        await props.onRequest(props.card, qualityProfileId)
+        await props.onRequest(props.card, qualityProfileId, activeSeasonNumber)
       }
       await refreshSeasonState(seasonValue || undefined)
     } catch (error) {
@@ -3083,12 +3083,68 @@ function DownloadsPage(props: {
   onDismissAllCompleted: () => void
 }) {
   const hasAny = props.processingItems.length > 0 || props.downloads.length > 0 || props.completedDownloads.length > 0
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedDownloadIds, setSelectedDownloadIds] = useState<string[]>([])
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
+  const [batchBusy, setBatchBusy] = useState(false)
+  const selectedCount = selectedDownloadIds.length + selectedHistoryIds.length
+
+  function toggleSelection(id: string, type: 'download' | 'history') {
+    const update = type === 'download' ? setSelectedDownloadIds : setSelectedHistoryIds
+    update((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  }
+
+  function closeSelectionMode() {
+    setSelectionMode(false)
+    setSelectedDownloadIds([])
+    setSelectedHistoryIds([])
+  }
+
+  async function cancelSelectedDownloads() {
+    if (!selectedDownloadIds.length || !window.confirm(`Cancel ${selectedDownloadIds.length} selected download${selectedDownloadIds.length === 1 ? '' : 's'}?`)) {
+      return
+    }
+
+    setBatchBusy(true)
+    try {
+      await Promise.all(selectedDownloadIds.map((id) => props.onDelete(id)))
+      setSelectedDownloadIds([])
+    } finally {
+      setBatchBusy(false)
+    }
+  }
+
+  function dismissSelectedHistory() {
+    if (!selectedHistoryIds.length || !window.confirm(`Delete ${selectedHistoryIds.length} selected history entr${selectedHistoryIds.length === 1 ? 'y' : 'ies'}?`)) {
+      return
+    }
+
+    selectedHistoryIds.forEach((id) => props.onDismissCompleted(id))
+    setSelectedHistoryIds([])
+  }
 
   return (
     <div className="downloads-page">
       <div className="downloads-header">
         <h2><DownloadGlyph /> <span>Downloads</span></h2>
+        <button
+          className={selectionMode ? 'downloads-selection-toggle is-active' : 'downloads-selection-toggle'}
+          onClick={selectionMode ? closeSelectionMode : () => setSelectionMode(true)}
+          type="button"
+        >
+          {selectionMode ? 'Done' : 'Select'}
+        </button>
       </div>
+
+      {selectionMode ? (
+        <div className="downloads-selection-toolbar">
+          <span>{selectedCount ? `${selectedCount} selected` : 'Select downloads or history entries'}</span>
+          <div>
+            {selectedDownloadIds.length ? <button disabled={batchBusy} onClick={() => void cancelSelectedDownloads()} type="button">Cancel downloads</button> : null}
+            {selectedHistoryIds.length ? <button disabled={batchBusy} onClick={dismissSelectedHistory} type="button">Delete history</button> : null}
+          </div>
+        </div>
+      ) : null}
 
       {props.processingItems.length > 0 ? (
         <section className="downloads-section">
@@ -3096,10 +3152,15 @@ function DownloadsPage(props: {
           <div className="downloads-grid">
             {props.processingItems.map((item) => (
               <article className="download-row download-row-processing" key={item.id}>
-                <div className="download-card">
+                  <div className="download-card">
                   <div className="download-artwork">
                     {item.posterUrl || item.backdropUrl
-                      ? <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                      ? (
+                        <picture>
+                          {item.posterUrl ? <source media="(max-width: 980px)" srcSet={item.posterUrl} /> : null}
+                          <img alt={item.title} loading="lazy" src={item.backdropUrl || item.posterUrl} />
+                        </picture>
+                      )
                       : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
                   </div>
                   <div className="download-copy">
@@ -3142,6 +3203,9 @@ function DownloadsPage(props: {
                 item={item}
                 key={item.id}
                 onDelete={props.onDelete}
+                onToggleSelection={() => toggleSelection(item.id, 'download')}
+                selected={selectedDownloadIds.includes(item.id)}
+                selectionMode={selectionMode}
               />
             ))}
           </div>
@@ -3152,21 +3216,33 @@ function DownloadsPage(props: {
         <section className="downloads-section">
           <div className="downloads-section-header">
             <h3 className="downloads-section-title">History</h3>
-            <button aria-label="Dismiss history" className="downloads-dismiss-all-button" onClick={props.onDismissAllCompleted} title="Dismiss history" type="button">
+            {!selectionMode ? <button aria-label="Dismiss history" className="downloads-dismiss-all-button" onClick={props.onDismissAllCompleted} title="Dismiss history" type="button">
               ×
-            </button>
+            </button> : null}
           </div>
           <div className="downloads-grid">
             {props.completedDownloads.map((item) => (
-              <article className={item.status === 'cancelled' ? 'download-row download-row-cancelled' : 'download-row download-row-completed'} key={item.id}>
-                <button
-                  aria-label={`Dismiss ${item.title}`}
-                  className="download-action-button download-delete-button download-history-dismiss-button"
-                  onClick={() => props.onDismissCompleted(item.id)}
-                  type="button"
-                >
-                  ×
-                </button>
+              <article className={`${item.status === 'cancelled' ? 'download-row download-row-cancelled' : 'download-row download-row-completed'}${selectionMode ? ' is-selecting' : ''}`} key={item.id}>
+                {selectionMode ? (
+                  <button
+                    aria-label={`Select ${item.title}`}
+                    aria-pressed={selectedHistoryIds.includes(item.id)}
+                    className={selectedHistoryIds.includes(item.id) ? 'download-selection-check is-selected' : 'download-selection-check'}
+                    onClick={() => toggleSelection(item.id, 'history')}
+                    type="button"
+                  >
+                    {selectedHistoryIds.includes(item.id) ? '✓' : null}
+                  </button>
+                ) : (
+                  <button
+                    aria-label={`Dismiss ${item.title}`}
+                    className="download-action-button download-delete-button download-history-dismiss-button"
+                    onClick={() => props.onDismissCompleted(item.id)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                )}
                 <div className="download-card">
                   <div className="download-artwork">
                     {item.posterUrl || item.backdropUrl
@@ -3206,9 +3282,14 @@ function DownloadsPage(props: {
       ) : null}
 
       {!hasAny ? (
-        <section className="downloads-section">
-          <div className="downloads-grid">
-            <EmptyState copy="The queue will appear here as soon as your services start working." title="No active downloads" />
+        <section className="downloads-section downloads-empty-section">
+          <div className="downloads-empty-state">
+            <div aria-hidden="true" className="downloads-empty-icon">
+              <DownloadGlyph />
+              <span />
+            </div>
+            <h4>No active downloads</h4>
+            <p>The queue will appear here as soon as your services start working.</p>
           </div>
         </section>
       ) : null}
@@ -3220,6 +3301,9 @@ function DownloadRow(props: {
   item: DownloadItem
   busy: boolean
   onDelete: (id: string) => Promise<void>
+  selectionMode: boolean
+  selected: boolean
+  onToggleSelection: () => void
 }) {
   const item = props.item
   const progressMeta = [item.size, item.speed, item.eta].filter(Boolean).join(' · ')
@@ -3234,10 +3318,26 @@ function DownloadRow(props: {
   }
 
   return (
-    <article className="download-row">
+    <article className={props.selectionMode ? 'download-row is-selecting' : 'download-row'}>
+      {props.selectionMode ? (
+        <button
+          aria-label={`Select ${item.title}`}
+          aria-pressed={props.selected}
+          className={props.selected ? 'download-selection-check is-selected' : 'download-selection-check'}
+          onClick={props.onToggleSelection}
+          type="button"
+        >
+          {props.selected ? '✓' : null}
+        </button>
+      ) : null}
       <div className="download-card">
         <div className="download-artwork">
-          {artwork ? <img alt={item.title} loading="lazy" src={artwork} /> : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
+          {artwork ? (
+            <picture>
+              {item.posterUrl ? <source media="(max-width: 980px)" srcSet={item.posterUrl} /> : null}
+              <img alt={item.title} loading="lazy" src={artwork} />
+            </picture>
+          ) : <div className="media-fallback download-poster-fallback">{item.title.slice(0, 1).toUpperCase()}</div>}
         </div>
         <div className="download-copy">
           <h4>{item.title}</h4>
@@ -3256,7 +3356,7 @@ function DownloadRow(props: {
             <div className={isCompleted ? 'download-progress-bar download-progress-complete' : 'download-progress-bar'}>
               <div className="download-progress-fill" style={{ width: `${item.progress}%` }} />
             </div>
-            <button
+            {!props.selectionMode ? <button
               aria-label={`Delete ${item.title}`}
               className="download-action-button download-delete-button"
               disabled={props.busy}
@@ -3264,7 +3364,7 @@ function DownloadRow(props: {
               type="button"
             >
               {props.busy ? '…' : '×'}
-            </button>
+            </button> : null}
           </div>
         </div>
       </div>
@@ -3408,7 +3508,12 @@ function CalendarPage(props: {
                       type="button"
                     >
                       <div className="calendar-entry-art">
-                        {entry.imageUrl ? <img alt={entry.title} loading="lazy" src={entry.imageUrl} /> : <div className="media-fallback">{entry.title.slice(0, 1).toUpperCase()}</div>}
+                        {entry.imageUrl || entry.card.posterUrl ? (
+                          <picture>
+                            {entry.card.posterUrl ? <source media="(max-width: 980px)" srcSet={entry.card.posterUrl} /> : null}
+                            <img alt={entry.title} loading="lazy" src={entry.imageUrl || entry.card.posterUrl} />
+                          </picture>
+                        ) : <div className="media-fallback">{entry.title.slice(0, 1).toUpperCase()}</div>}
                       </div>
                       <div className="calendar-entry-copy">
                         <h4>{entry.title}</h4>
