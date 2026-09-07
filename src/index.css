@@ -196,6 +196,8 @@ img {
 .sidebar-profile-copy,
 .sidebar-link > span:last-child,
 .sidebar-settings > span:last-child {
+  position: absolute;
+  left: 3.75rem;
   white-space: nowrap;
   opacity: 0;
   max-width: 0;
@@ -215,16 +217,8 @@ img {
 .reiverr-sidebar:hover .sidebar-profile,
 .reiverr-sidebar:hover .sidebar-link,
 .reiverr-sidebar:hover .sidebar-settings {
-  justify-content: flex-start;
-}
-
-.reiverr-sidebar:hover .sidebar-profile,
-.reiverr-sidebar:hover .sidebar-link,
-.reiverr-sidebar:hover .sidebar-settings {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  padding: 0.75rem;
+  justify-content: center;
+  overflow: visible;
 }
 
 .reiverr-sidebar:not(:hover) .sidebar-profile,
@@ -334,6 +328,8 @@ img {
 }
 
 .sidebar-disk-copy {
+  position: absolute;
+  left: 3.75rem;
   display: grid;
   gap: 0.15rem;
   min-width: 0;
@@ -361,11 +357,8 @@ img {
 }
 
 .reiverr-sidebar:hover .sidebar-disk {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  justify-content: flex-start;
-  padding: 0.75rem;
+  justify-content: center;
+  overflow: visible;
 }
 
 .reiverr-sidebar:hover .sidebar-disk-copy {
@@ -411,7 +404,7 @@ img {
 }
 
 .reiverr-sidebar:hover .sidebar-settings {
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .sidebar-settings-icon {
@@ -509,11 +502,7 @@ img {
 
 .reiverr-sidebar:hover .sidebar-footer > .sidebar-disk,
 .reiverr-sidebar:hover .sidebar-footer > .sidebar-settings {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  justify-content: flex-start;
-  padding: 0.75rem;
+  justify-content: center;
 }
 
 .reiverr-sidebar:not(:hover) .sidebar-footer > .sidebar-disk,
@@ -522,11 +511,6 @@ img {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
-}
-
-.reiverr-sidebar:not(:hover) .sidebar-link.active {
-  background: transparent;
-  box-shadow: none;
 }
 
 .content-shell {
@@ -1382,37 +1366,6 @@ img {
 .sidebar-settings:hover {
   background: rgba(255, 255, 255, 0.12);
   box-shadow: -3px 6px 13px rgba(0, 0, 0, 0.2);
-}
-
-.reiverr-sidebar:not(:hover) .sidebar-link.active {
-  width: 2.9rem;
-  min-width: 2.9rem;
-  max-width: 2.9rem;
-  justify-self: center;
-  align-self: center;
-  background: transparent;
-  box-shadow: none;
-  overflow: visible;
-}
-
-.reiverr-sidebar:not(:hover) .sidebar-link.active::before {
-  content: "";
-  position: absolute;
-  inset: 50% auto auto 50%;
-  width: 2.9rem;
-  height: 2.9rem;
-  transform: translate(-50%, -50%);
-  border-radius: 0.8rem;
-  background: rgba(255, 255, 255, 0.12);
-  box-shadow: -2px 4px 10px rgba(0, 0, 0, 0.18);
-  z-index: 0;
-}
-
-.reiverr-sidebar:not(:hover) .sidebar-link.active .sidebar-link-short {
-  background: rgba(255, 255, 255, 0.18);
-  box-shadow: -2px 4px 10px rgba(0, 0, 0, 0.24);
-  position: relative;
-  z-index: 1;
 }
 
 .reiverr-sidebar:not(:hover) .sidebar-settings {
@@ -4225,6 +4178,7 @@ img {
   .reiverr-sidebar:not(:hover) .sidebar-profile-copy,
   .reiverr-sidebar:not(:hover) .sidebar-link > span:last-child,
   .reiverr-sidebar:not(:hover) .sidebar-settings > span:last-child {
+    position: static;
     width: auto;
     opacity: 1;
     transform: none;
@@ -4247,6 +4201,7 @@ img {
 
   .sidebar-disk-copy,
   .reiverr-sidebar:not(:hover) .sidebar-disk-copy {
+    position: static;
     width: auto;
     opacity: 1;
     transform: none;
