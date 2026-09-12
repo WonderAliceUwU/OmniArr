@@ -2947,7 +2947,7 @@ export async function setEpisodeWatchState(config: AppConfig, payload: EpisodeWa
     method: payload.watched ? 'POST' : 'DELETE',
     headers: {
       Accept: 'application/json',
-      'X-Emby-Token': config.jellyfin.apiKey
+      Authorization: `MediaBrowser Token="${config.jellyfin.apiKey}"`
     }
   })
 
@@ -2971,7 +2971,7 @@ export async function proxyJellyfinImage(
     const path = `/${collection}/${encodeURIComponent(itemId)}/Images/${encodeURIComponent(candidate)}?quality=90&maxWidth=${maxWidth}&tag=${encodeURIComponent(tag)}`;
     const response = await fetch(`${config.jellyfin.baseUrl}${path}`, {
       headers: {
-        'X-Emby-Token': config.jellyfin.apiKey
+        Authorization: `MediaBrowser Token="${config.jellyfin.apiKey}"`
       }
     });
 
@@ -3576,7 +3576,7 @@ async function getJellyfinUsersFromConfig(baseUrl: string, apiKey: string): Prom
     `${baseUrl}/Users`,
     {
       headers: {
-        'X-Emby-Token': apiKey
+        Authorization: `MediaBrowser Token="${apiKey}"`
       }
     }
   );
@@ -3769,7 +3769,7 @@ async function testJellyfin(config: AppConfig): Promise<ConnectionStatus> {
   try {
     await fetchJson(`${config.jellyfin.baseUrl}/System/Info`, {
       headers: {
-        'X-Emby-Token': config.jellyfin.apiKey
+        Authorization: `MediaBrowser Token="${config.jellyfin.apiKey}"`
       }
     });
     return { key: 'jellyfin', label: 'Jellyfin', ok: true, message: 'Connected' };
@@ -3888,7 +3888,7 @@ async function jellyfinFetch<T>(config: AppConfig, pathWithQuery: string): Promi
     `${config.jellyfin.baseUrl}${pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`}`,
     {
       headers: {
-        'X-Emby-Token': config.jellyfin.apiKey
+        Authorization: `MediaBrowser Token="${config.jellyfin.apiKey}"`
       }
     }
   );
