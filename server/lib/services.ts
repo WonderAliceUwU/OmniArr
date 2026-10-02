@@ -2736,7 +2736,7 @@ export async function requestSeries(
       'X-Api-Key': config.sonarr.apiKey,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ ...series, seasons })
+    body: JSON.stringify({ ...series, monitored: true, seasons })
   })
 
   await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
@@ -2787,6 +2787,7 @@ export async function requestSeason(config: AppConfig, payload: SeasonRequestPay
     },
     body: JSON.stringify({
       ...series,
+      monitored: true,
       seasons: nextSeasons
     })
   });
