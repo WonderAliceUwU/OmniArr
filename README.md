@@ -10,6 +10,8 @@ request downloads and monitor storage from a single place.
 [![Docker pulls](https://img.shields.io/docker/pulls/wonderalice/omniarr)](https://hub.docker.com/r/wonderalice/omniarr)
 [![License](https://img.shields.io/badge/license-private-lightgrey)](https://github.com/WonderAliceUwU/omniarr)
 
+If OmniArr is useful to you, you can support its development on [Ko-fi](https://ko-fi.com/WonderAliceUwU).
+
 ## What you get
 
 - Jellyfin profile login with an `HttpOnly` session cookie.
