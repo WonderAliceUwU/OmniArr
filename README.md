@@ -8,7 +8,7 @@ request downloads and monitor storage from a single place.
 
 [![Docker image](https://img.shields.io/docker/v/wonderalice/omniarr?sort=semver&label=docker)](https://hub.docker.com/r/wonderalice/omniarr)
 [![Docker pulls](https://img.shields.io/docker/pulls/wonderalice/omniarr)](https://hub.docker.com/r/wonderalice/omniarr)
-[![License](https://img.shields.io/badge/license-private-lightgrey)](https://github.com/WonderAliceUwU/omniarr)
+[![License](https://img.shields.io/badge/license-private-lightgrey)](https://github.com/WonderAliceUwU/OmniArr)
 
 If OmniArr is useful to you, you can support its development on [Ko-fi](https://ko-fi.com/WonderAliceUwU).
 
@@ -56,7 +56,7 @@ the Administration area.
 The Compose file in this repository is ready to use as-is:
 
 ```bash
-curl -O https://raw.githubusercontent.com/WonderAliceUwU/omniarr/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/WonderAliceUwU/OmniArr/main/docker-compose.yml
 docker compose up -d
 ```
 
