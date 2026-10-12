@@ -29,7 +29,7 @@ Create a directory for OmniArr and add this `docker-compose.yml`:
 ```yaml
 services:
   omniarr:
-    image: wonderalice/omniarr:1.0
+    image: wonderalice/omniarr:1.1
     container_name: omniarr
     restart: unless-stopped
     ports:
@@ -37,7 +37,6 @@ services:
     environment:
       PORT: "8787"
       OMNIARR_DATA_DIR: /app/data
-      TMDB_BEARER_TOKEN: ${TMDB_BEARER_TOKEN:-}
     volumes:
       - ${OMNIARR_DATA_DIR:-./data}:/app/data
 ```
@@ -74,14 +73,14 @@ the mount loses that state when the container is replaced.
 
 ## Docker image tags
 
-The first public release is available as:
+The current release is available as:
 
 ```text
-wonderalice/omniarr:1.0
+wonderalice/omniarr:1.1
 wonderalice/omniarr:latest
 ```
 
-Pin `1.0` in production for repeatable updates. Use `latest` only when you want
+Pin `1.1` in production for repeatable updates. Use `latest` only when you want
 Compose to follow the newest published image.
 
 ## Build and publish
@@ -92,7 +91,7 @@ To publish a multi-architecture image to Docker Hub:
 docker login
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t wonderalice/omniarr:1.0 \
+  -t wonderalice/omniarr:1.1 \
   -t wonderalice/omniarr:latest \
   --push \
   .
@@ -128,8 +127,8 @@ OmniArr keeps critical state under `OMNIARR_DATA_DIR` (by default
 `/app/data/omniarr.secure.json`.
 
 Keep the data directory private, use a strong master password and provide the
-TMDb token through an environment variable instead of committing it to source
-control.
+TMDb token through the Administration area. It is stored encrypted with the
+rest of the application configuration.
 
 ## License
 

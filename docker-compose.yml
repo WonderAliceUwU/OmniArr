@@ -1,6 +1,6 @@
 services:
   omniarr:
-    image: wonderalice/omniarr:1.0
+    image: wonderalice/omniarr:1.1
     # Para construir desde código fuente en su lugar, descomenta estas líneas:
     # build:
     #   context: .
@@ -12,6 +12,5 @@ services:
     environment:
       PORT: "8787"
       OMNIARR_DATA_DIR: /app/data
-      TMDB_BEARER_TOKEN: ${TMDB_BEARER_TOKEN:-}
     volumes:
       - ${OMNIARR_DATA_DIR:-./data}:/app/data
