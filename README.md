@@ -1,4 +1,4 @@
-# OmniArr
+# OmniArr - Every Arr unified
 
 Self-hosted media discovery and download management for Jellyfin users.
 
