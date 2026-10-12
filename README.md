@@ -86,12 +86,16 @@ Compose to follow the newest published image.
 
 ## Build and publish
 
-The included script builds a multi-architecture image and publishes both the
-version tag and `latest` to Docker Hub:
+To publish a multi-architecture image to Docker Hub:
 
 ```bash
 docker login
-./build.sh 1.0
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t wonderalice/omniarr:1.0 \
+  -t wonderalice/omniarr:latest \
+  --push \
+  .
 ```
 
 To build locally without publishing:
