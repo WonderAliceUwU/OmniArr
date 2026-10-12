@@ -143,7 +143,6 @@ htmlcov/
 ### Project secrets
 # Local persisted app secrets/config
 data/*.secure.json
-omniarr/data/*.secure.json
 buildandpush.sh
 
 # Server-side compiled JS artifacts generated from TS sources
