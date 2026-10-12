@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.DS_Store
+node_modules
+dist
+dist-server
+data
+*.log
+.env
+.env.*
+!.env.example
