@@ -21,6 +21,9 @@ If OmniArr is useful to you, you can support its development on [Ko-fi](https://
 
   <img width="4212" height="2564" alt="Screenshot 2026-10-13 at 09 46 52" src="https://github.com/user-attachments/assets/be2ccf0f-1697-4191-9438-77e2415ef827" />
 
+  <img width="4284" height="2536" alt="Screenshot 2026-10-13 at 10 43 21" src="https://github.com/user-attachments/assets/73d7bd96-3001-4b55-9679-875b644b3577" />
+
+
 - A calendar tracking your new episodes and events.
 
   <img width="4214" height="2566" alt="Screenshot 2026-10-13 at 09 46 05" src="https://github.com/user-attachments/assets/c614b617-5ee5-437f-a4f0-30f2ac89a71b" />
