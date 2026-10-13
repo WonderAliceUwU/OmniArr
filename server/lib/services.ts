@@ -4486,7 +4486,7 @@ function daysAgoIso(days: number): string {
 }
 
 function getTmdbToken(config: AppConfig): string {
-  return process.env.TMDB_BEARER_TOKEN || config.tmdb.bearerToken;
+  return config.tmdb.bearerToken;
 }
 
 function getTvdbApiKey(config: AppConfig): string {

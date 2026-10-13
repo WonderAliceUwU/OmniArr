@@ -1,8 +1,7 @@
 services:
   omniarr:
-    image: wonderalice/aliceserver:latest
-    # Para usar una versión específica, cambia 'latest' por el tag (ej: wonderalice/aliceserver:1.0.0)
-    # Para construir desde código fuente en su lugar, descomenta las siguientes líneas:
+    image: wonderalice/omniarr:1.1
+    # Para construir desde código fuente en su lugar, descomenta estas líneas:
     # build:
     #   context: .
     #   dockerfile: Dockerfile
@@ -13,6 +12,5 @@ services:
     environment:
       PORT: "8787"
       OMNIARR_DATA_DIR: /app/data
-      TMDB_BEARER_TOKEN: ""
     volumes:
-      - ./data:/app/data
+      - ${OMNIARR_DATA_DIR:-./data}:/app/data

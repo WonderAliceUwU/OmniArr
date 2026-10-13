@@ -3972,9 +3972,7 @@ img {
 .auth-wallpaper {
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.7)),
-    url('/omniarr/server-wallpaper.png') center/cover no-repeat;
+  background: linear-gradient(145deg, #18263b, #080b12 70%);
 }
 
 .glass-card {

@@ -445,7 +445,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const image = await proxyJellyfinImage(config, itemId, kind, maxWidth, tag);
     if (!image) {
       response.writeHead(302, {
-        Location: '/omniarr/placeholder.jpg',
+        Location: '/placeholder.jpg',
         'Cache-Control': 'private, max-age=300'
       });
       response.end();

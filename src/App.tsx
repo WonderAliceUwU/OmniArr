@@ -3715,7 +3715,7 @@ function SettingsView(props: {
       <SettingsCard title="TMDb">
         <label>
           Bearer token
-          <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="Optional if already provided via TMDB_BEARER_TOKEN" value={props.config.tmdb.bearerToken} />
+          <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="Enter your TMDb bearer token" value={props.config.tmdb.bearerToken} />
         </label>
       </SettingsCard>
 
