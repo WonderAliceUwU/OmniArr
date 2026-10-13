@@ -2,6 +2,8 @@
 
 Self-hosted media discovery and download management for Jellyfin users.
 
+<img width="4210" height="2560" alt="Screenshot 2026-10-13 at 09 45 47" src="https://github.com/user-attachments/assets/9c209c29-f357-4439-be2a-e7a2a7f0e2b1" />
+
 OmniArr brings your favourite services together in one clean dashboard: browse
 your Jellyfin library, discover movies and series, follow upcoming releases,
 request downloads and monitor storage from a single place.
@@ -14,13 +16,22 @@ If OmniArr is useful to you, you can support its development on [Ko-fi](https://
 
 ## What you get
 
-- Jellyfin profile login with an `HttpOnly` session cookie.
-- A protected administration area with encrypted service settings.
-- Browsing for movies, series, anime and K-dramas.
-- Integrations for Jellyfin, Sonarr, Radarr, qBittorrent and TMDb.
-- Download progress, completed items, calendar and storage monitoring.
-- One production Node process serving the frontend and API.
-- Docker images published for `linux/amd64` and `linux/arm64`.
+- It connects with all your jellyfin users, the log in stays consistent
+- Integration with sonarr and radarr to manage your library
+  
+  <img width="4212" height="2564" alt="Screenshot 2026-10-13 at 09 46 52" src="https://github.com/user-attachments/assets/be2ccf0f-1697-4191-9438-77e2415ef827" />
+  
+- A calendar tracking all your new episodes and events
+
+  <img width="4214" height="2566" alt="Screenshot 2026-10-13 at 09 46 05" src="https://github.com/user-attachments/assets/c614b617-5ee5-437f-a4f0-30f2ac89a71b" />
+  
+- Every discovery and searching you may need
+
+  <img width="4208" height="2562" alt="Screenshot 2026-10-13 at 09 47 49" src="https://github.com/user-attachments/assets/82766b80-fb0d-4ff2-b594-203e6b52828f" />
+
+- A download manager to see what's cooking
+  
+And many things more!
 
 ## Install with Docker Compose
 
