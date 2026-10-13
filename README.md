@@ -1,144 +1,147 @@
-# OmniArr
+# OmniArr - Every Arr unified
 
-React + TypeScript frontend with a built-in Node backend for:
+Self-hosted media discovery and download management for Jellyfin users.
 
-- Jellyfin-profile login with an `HttpOnly` session cookie
-- master-password protected administration and server-side service settings
-- Jellyfin, Sonarr, Radarr, qBittorrent and TMDb integration
-- a single production process for Docker/TrueNAS
+<img width="4210" height="2560" alt="Screenshot 2026-10-13 at 09 45 47" src="https://github.com/user-attachments/assets/9c209c29-f357-4439-be2a-e7a2a7f0e2b1" />
 
-## Persistence
+OmniArr brings your favourite services together in one clean dashboard: browse
+your Jellyfin library, discover movies and series, follow upcoming releases,
+request downloads and monitor storage from a single place.
 
-All critical state is persisted under `OMNIARR_DATA_DIR`.
+[![Docker image](https://img.shields.io/docker/v/wonderalice/omniarr?sort=semver&label=docker)](https://hub.docker.com/r/wonderalice/omniarr)
+[![Docker pulls](https://img.shields.io/docker/pulls/wonderalice/omniarr)](https://hub.docker.com/r/wonderalice/omniarr)
+[![License](https://img.shields.io/badge/license-private-lightgrey)](https://github.com/WonderAliceUwU/OmniArr)
 
-By default inside the container that is:
+If OmniArr is useful to you, you can support its development on [Ko-fi](https://ko-fi.com/WonderAliceUwU).
 
-```text
-/app/data
+## What you get
+
+- It connects with all your Jellyfin users, the login stays consistent.
+- Integration with Sonarr and Radarr to manage your library.
+
+  <img width="4212" height="2564" alt="Screenshot 2026-10-13 at 09 46 52" src="https://github.com/user-attachments/assets/be2ccf0f-1697-4191-9438-77e2415ef827" />
+
+- A calendar tracking your new episodes and events.
+
+  <img width="4214" height="2566" alt="Screenshot 2026-10-13 at 09 46 05" src="https://github.com/user-attachments/assets/c614b617-5ee5-437f-a4f0-30f2ac89a71b" />
+
+- Every discovery and search you may need.
+
+  <img width="4208" height="2562" alt="Screenshot 2026-10-13 at 09 47 49" src="https://github.com/user-attachments/assets/82766b80-fb0d-4ff2-b594-203e6b52828f" />
+
+- A download manager to see what's cooking.
+
+And many things more!
+
+## Install with Docker Compose
+
+Create a directory for OmniArr and add this `docker-compose.yml`:
+
+```yaml
+services:
+  omniarr:
+    image: wonderalice/omniarr:1.1
+    container_name: omniarr
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      OMNIARR_DATA_DIR: /app/data
+    volumes:
+      - ${OMNIARR_DATA_DIR:-./data}:/app/data
 ```
 
-The encrypted state file is:
-
-```text
-/app/data/omniarr.secure.json
-```
-
-That file contains:
-
-- master-password verifier
-- encryption salt
-- server-managed encryption key and encrypted application settings
-
-If you do not persist `/app/data`, you will lose:
-
-- the master password
-- all integration settings
-- all saved configuration after restart, redeploy or image update
-
-## Local Development
-
-Single command:
+Then start the container:
 
 ```bash
+docker compose pull
+docker compose up -d
+```
+
+Open `http://localhost:8787` and create the master password during the first
+boot. Configure the Jellyfin, Sonarr, Radarr and qBittorrent connections from
+the Administration area.
+
+The Compose file in this repository is ready to use as-is:
+
+```bash
+curl -O https://raw.githubusercontent.com/WonderAliceUwU/OmniArr/main/docker-compose.yml
+docker compose up -d
+```
+
+Set `OMNIARR_DATA_DIR` to a host dataset when you want the data outside the
+current directory. For example, on TrueNAS:
+
+```bash
+export OMNIARR_DATA_DIR=/path/to/omniarr-data
+docker compose up -d
+```
+
+The `/app/data` mount is required. It contains the encrypted application state,
+including the master-password verifier and saved integration settings. Removing
+the mount loses that state when the container is replaced.
+
+## Docker image tags
+
+The current release is available as:
+
+```text
+wonderalice/omniarr:1.1
+wonderalice/omniarr:latest
+```
+
+Pin `1.1` in production for repeatable updates. Use `latest` only when you want
+Compose to follow the newest published image.
+
+## Build and publish
+
+To publish a multi-architecture image to Docker Hub:
+
+```bash
+docker login
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t wonderalice/omniarr:1.1 \
+  -t wonderalice/omniarr:latest \
+  --push \
+  .
+```
+
+To build locally without publishing:
+
+```bash
+docker build -t omniarr:local .
+docker run --rm -p 8787:8787 -v "$PWD/data:/app/data" omniarr:local
+```
+
+## Local development
+
+Requirements: Node.js 22 or newer and npm.
+
+```bash
+npm ci
 npm run dev:all
 ```
 
-That starts:
-
-- Vite frontend
-- Node API server
-
-If you want them separately:
+The production build can be checked with:
 
 ```bash
-npm run dev:server
-npm run dev
-```
-
-## Production
-
-Build and serve:
-
-```bash
-npm run serve
-```
-
-Or separately:
-
-```bash
+npm run lint
 npm run build
-npm run start
 ```
 
-The production server serves both the static frontend and the API on the same port.
+## Data and security
 
-## Docker
+OmniArr keeps critical state under `OMNIARR_DATA_DIR` (by default
+`/app/data` inside the container). The encrypted store is written to
+`/app/data/omniarr.secure.json`.
 
-Build:
+Keep the data directory private, use a strong master password and provide the
+TMDb token through the Administration area. It is stored encrypted with the
+rest of the application configuration.
 
-```bash
-docker build -t omniarr .
-```
+## License
 
-Run with persistence:
-
-```bash
-docker run -d \
-  --name omniarr \
-  --restart unless-stopped \
-  -p 8787:8787 \
-  -e PORT=8787 \
-  -e OMNIARR_DATA_DIR=/app/data \
-  -e TMDB_BEARER_TOKEN=your_tmdb_bearer_token \
-  -v /path/on/host/omniarr-data:/app/data \
-  omniarr
-```
-
-## Docker Compose
-
-There is a ready [docker-compose.yml](./docker-compose.yml).
-
-Start it with:
-
-```bash
-docker compose up -d --build
-```
-
-The default compose file uses:
-
-```text
-./data:/app/data
-```
-
-For TrueNAS, replace `./data` with a persistent dataset path if you prefer bind mounts managed outside the app directory.
-
-## TrueNAS Notes
-
-Recommended app/container settings:
-
-- Container port: `8787`
-- Host port: your choice, commonly `8787`
-- Storage mount: persistent dataset -> `/app/data`
-- Restart policy: `unless-stopped`
-
-Recommended environment variables:
-
-- `PORT=8787`
-- `OMNIARR_DATA_DIR=/app/data`
-- `TMDB_BEARER_TOKEN=...` if you want TMDb configured at deploy time
-
-Example host dataset mount:
-
-```text
-/path/to/omniarr-data -> /app/data
-```
-
-That dataset is the piece that must survive updates and image replacements.
-
-## First Boot
-
-On first boot there is no default password.
-
-You create the master password in the UI. It protects the Administration area; viewers sign in from the profile screen using their own Jellyfin password.
-
-After that, OmniArr stores only the verifier and encrypted settings in `/app/data/omniarr.secure.json`.
+OmniArr is currently distributed as a private project. See the repository for
+the licensing status of your copy.
