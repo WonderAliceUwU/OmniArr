@@ -343,12 +343,17 @@ function App() {
 
   async function handleSaveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    await saveSettings()
+  }
+
+  async function saveSettings() {
     setBusy(true)
     setError('')
     setNotice('')
     try {
       const response = await api.saveSettings(config)
       setConfig(response.config)
+      setConnections(response.connections)
       await refreshBaseData()
       setNotice('Settings saved and services refreshed.')
     } catch (saveError) {
@@ -510,6 +515,7 @@ function App() {
         config={config}
         connections={connections}
         onExit={() => setAuthState('profiles')}
+        onCheck={saveSettings}
         onSave={handleSaveSettings}
         options={options}
         updateConfig={updateConfig}
@@ -605,6 +611,7 @@ function App() {
                 busy={busy}
                 config={config}
                 connections={connections}
+                onCheck={saveSettings}
                 onSave={handleSaveSettings}
                 options={options}
                 updateConfig={updateConfig}
@@ -618,7 +625,6 @@ function App() {
                 onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })}
                 onRequest={handleRequest}
                 route={route}
-                tmdbToken={config.tmdb.bearerToken}
               />
             ) : null}
           </div>
@@ -1275,7 +1281,6 @@ function HubPageView(props: {
   onRequest: (card: MediaCard) => Promise<void>
   onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
   busy: boolean
-  tmdbToken: string
 }) {
   if (props.loading) {
     return <LoadingHub />
@@ -1305,7 +1310,7 @@ function HubPageView(props: {
 
   return (
     <div className="hub-page">
-      <HeroShowcase hero={props.hub.hero} onOpenCard={props.onOpenCard} tmdbToken={props.tmdbToken} />
+      <HeroShowcase hero={props.hub.hero} onOpenCard={props.onOpenCard} />
       {props.hub.continueWatching?.length ? (
         <SectionCarousel busy={props.busy} onOpenCard={props.onOpenCard} onRequest={props.onRequest} section={{ id: 'continue', title: 'Continue Watching', style: 'episode', items: props.hub.continueWatching }} />
       ) : null}
@@ -1338,7 +1343,7 @@ function LibraryGrid(props: {
   )
 }
 
-function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void; tmdbToken: string }) {
+function HeroShowcase({ hero, onOpenCard }: { hero: MediaCard[]; onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void }) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [activeLogoUrl, setActiveLogoUrl] = useState('')
   const logoCacheRef = useRef(new Map<string, string>())
@@ -1390,15 +1395,7 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
       return
     }
 
-    const fetchImages = tmdbToken
-      ? fetch(`https://api.themoviedb.org/3/${mediaType}/${featured.tmdbId}/images`, {
-          headers: {
-            Authorization: `Bearer ${tmdbToken}`,
-          },
-        })
-      : fetch(`/api/tmdb/logo?tmdbId=${featured.tmdbId}&mediaType=${mediaType}`)
-
-    void fetchImages
+    void fetch(`/api/tmdb/logo?tmdbId=${featured.tmdbId}&mediaType=${mediaType}`)
       .then(async (response) => {
         if (!response.ok) {
           throw new Error('Failed to load logo')
@@ -1406,7 +1403,6 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
 
         return response.json() as Promise<{
           logos?: Array<{ file_path: string; iso_639_1: string | null }>
-          backdrops?: Array<{ file_path: string; iso_639_1: string | null }>
         }>
       })
       .then((payload) => {
@@ -1428,7 +1424,7 @@ function HeroShowcase({ hero, onOpenCard, tmdbToken }: { hero: MediaCard[]; onOp
     return () => {
       cancelled = true
     }
-  }, [featured, tmdbToken])
+  }, [featured])
 
   if (!featured) {
     return (
@@ -3909,6 +3905,7 @@ function AdministrationScreen(props: {
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onCheck: () => Promise<void>
   busy: boolean
 }) {
   return (
@@ -3921,18 +3918,15 @@ function AdministrationScreen(props: {
           <p className="eyebrow">Administration</p>
           <h1>Settings</h1>
         </div>
-        <button aria-label="Save settings" className={props.busy ? 'administration-save-button is-saving' : 'administration-save-button'} disabled={props.busy} form="administration-settings" title="Save settings" type="submit">
-          <CheckGlyph />
-        </button>
       </header>
       <SettingsView
         busy={props.busy}
         config={props.config}
         connections={props.connections}
+        onCheck={props.onCheck}
         onSave={props.onSave}
         options={props.options}
         formId="administration-settings"
-        showSubmit={false}
         updateConfig={props.updateConfig}
       />
     </div>
@@ -3945,20 +3939,21 @@ function SettingsView(props: {
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  onCheck: () => Promise<void>
   busy: boolean
   formId?: string
-  showSubmit?: boolean
 }) {
+  const check = { busy: props.busy, onCheck: props.onCheck }
+
   return (
     <form className="settings-page" id={props.formId} onSubmit={(event) => void props.onSave(event)}>
       <SettingsCard title="Connections">
         <div className="settings-connections">
-          {props.connections.map((connection) => (
+          {SERVICE_KEYS.map((key) => getServiceStatus(props.connections, key) ?? notCheckedYet(key)).map((connection) => (
             <div className="settings-connection" key={connection.key} title={connection.message}>
               <div className="settings-connection-label">
                 <span className={`status-dot ${getConnectionDotState(connection)}`} />
                 <strong>{connection.label}</strong>
-                {connection.optional ? <span className="settings-optional-tag">Optional</span> : null}
               </div>
               <span className="settings-connection-message">{connection.message}</span>
             </div>
@@ -3966,7 +3961,7 @@ function SettingsView(props: {
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Preferences">
+      <SettingsCard title="Preferences" {...check}>
         <label>
           Language
           <input className="input" onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, language: event.target.value })} value={props.config.preferences.language} />
@@ -3977,7 +3972,7 @@ function SettingsView(props: {
         </label>
       </SettingsCard>
 
-      <SettingsCard title="Jellyfin">
+      <SettingsCard status={getServiceStatus(props.connections, 'jellyfin') ?? notCheckedYet('jellyfin')} title="Jellyfin" {...check}>
         <ServiceFields
           apiKey={props.config.jellyfin.apiKey}
           baseUrl={props.config.jellyfin.baseUrl}
@@ -3986,7 +3981,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard optional title="Sonarr">
+      <SettingsCard status={getServiceStatus(props.connections, 'sonarr') ?? notCheckedYet('sonarr')} title="Sonarr" {...check}>
         <ServiceFields
           apiKey={props.config.sonarr.apiKey}
           baseUrl={props.config.sonarr.baseUrl}
@@ -4003,7 +3998,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard optional title="Radarr">
+      <SettingsCard status={getServiceStatus(props.connections, 'radarr') ?? notCheckedYet('radarr')} title="Radarr" {...check}>
         <ServiceFields
           apiKey={props.config.radarr.apiKey}
           baseUrl={props.config.radarr.baseUrl}
@@ -4020,38 +4015,57 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard optional title="TMDb">
+      <SettingsCard status={getServiceStatus(props.connections, 'tmdb') ?? notCheckedYet('tmdb')} title="TMDb" {...check}>
         <label>
-          Bearer token
-          <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="Enter your TMDb bearer token" value={props.config.tmdb.bearerToken} />
+          API key or Read Access Token
+          <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="API key or API Read Access Token" value={props.config.tmdb.bearerToken} />
         </label>
       </SettingsCard>
 
-      <SettingsCard optional title="TVDB">
+      <SettingsCard status={getServiceStatus(props.connections, 'tvdb') ?? notCheckedYet('tvdb')} title="TVDB" {...check}>
         <label>
           API key
           <input className="input" onChange={(event) => props.updateConfig('tvdb', { apiKey: event.target.value })} placeholder="Optional if already provided via TVDB_API_KEY" value={props.config.tvdb.apiKey} />
         </label>
       </SettingsCard>
 
-      {props.showSubmit !== false ? <div className="actions-row">
-        <button className="primary-button" disabled={props.busy} type="submit">
-          {props.busy ? 'Saving…' : 'Save settings'}
-        </button>
-      </div> : null}
     </form>
   )
 }
 
-function SettingsCard({ title, optional, children }: { title: string; optional?: boolean; children: ReactNode }) {
+const SERVICE_KEYS: ConnectionStatus['key'][] = ['jellyfin', 'sonarr', 'radarr', 'tmdb', 'tvdb']
+const SERVICE_LABELS: Record<ConnectionStatus['key'], string> = { jellyfin: 'Jellyfin', sonarr: 'Sonarr', radarr: 'Radarr', tmdb: 'TMDb', tvdb: 'TVDB' }
+
+// Stands in until the server has reported on a service, so the list is never empty.
+function notCheckedYet(key: ConnectionStatus['key']): ConnectionStatus {
+  return { key, label: SERVICE_LABELS[key], ok: false, message: 'Not configured', configured: false, optional: key !== 'jellyfin' }
+}
+
+function SettingsCard({ title, status, busy, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
   return (
     <section className="settings-card">
-      <h2>
-        {title}
-        {optional ? <span className="settings-optional-tag">Optional</span> : null}
-      </h2>
+      <div className="settings-card-header">
+        <h2>{title}</h2>
+        {onCheck ? (
+          <button aria-label={`Save and check ${title}`} className="settings-card-check" disabled={busy} onClick={() => void onCheck()} title="Save and check" type="button">
+            <CheckGlyph />
+          </button>
+        ) : null}
+      </div>
       <div className="settings-fields">{children}</div>
+      {status ? <div className="settings-card-footer"><ServiceCardStatus status={status} /></div> : null}
     </section>
+  )
+}
+
+// The result of the last check, which runs when the card's check button saves
+// the settings, so the person can tell right there whether the URL and key work.
+function ServiceCardStatus({ status }: { status: ConnectionStatus }) {
+  return (
+    <p className="settings-card-status" title={status.message}>
+      <span className={`status-dot ${getConnectionDotState(status)}`} />
+      <span>{status.message}</span>
+    </p>
   )
 }
 

@@ -3842,7 +3842,7 @@ async function testService(
   label: string,
   optional: boolean,
   required: Array<[name: string, value: string]>,
-  check: () => Promise<void>
+  check: () => Promise<string | void>
 ): Promise<ConnectionStatus> {
   const missing = required.filter(([, value]) => !value.trim()).map(([name]) => name);
   if (missing.length === required.length) {
@@ -3853,8 +3853,8 @@ async function testService(
   }
 
   try {
-    await check();
-    return { key, label, ok: true, message: 'Connected', configured: true, optional };
+    const note = await check();
+    return { key, label, ok: true, message: note || 'Connected', configured: true, optional };
   } catch (error) {
     const message = errorMessage(error);
     // Node reports network errors as a bare "fetch failed".
@@ -3879,6 +3879,7 @@ function testSonarr(config: AppConfig): Promise<ConnectionStatus> {
         'X-Api-Key': config.sonarr.apiKey
       }
     });
+    return warnIfKeyNotChecked('Sonarr', `${config.sonarr.baseUrl}/api/v3/health`);
   });
 }
 
@@ -3889,14 +3890,26 @@ function testRadarr(config: AppConfig): Promise<ConnectionStatus> {
         'X-Api-Key': config.radarr.apiKey
       }
     });
+    return warnIfKeyNotChecked('Radarr', `${config.radarr.baseUrl}/api/v3/health`);
   });
+}
+
+// Sonarr and Radarr can skip authentication for local addresses, and then any
+// key passes. Retry with a made-up key so a typo doesn't look like a success.
+async function warnIfKeyNotChecked(label: string, url: string): Promise<string | undefined> {
+  try {
+    await fetchJson(url, { headers: { 'X-Api-Key': 'aliceflix-invalid-key' } });
+    return `Reachable, but ${label} accepts any API key from here, so the key can't be verified`;
+  } catch {
+    return undefined;
+  }
 }
 
 function testTmdb(config: AppConfig): Promise<ConnectionStatus> {
   return testService('tmdb', 'TMDb', true, [['token', getTmdbToken(config)]], async () => {
     // tmdbFetch swallows errors and returns null, so treat that as a failure.
     if (!await tmdbFetch(config, '/configuration')) {
-      throw new Error('TMDb rejected the token or is unreachable');
+      throw new Error('TMDb rejected the key or is unreachable');
     }
   });
 }
@@ -3931,11 +3944,17 @@ async function tmdbFetch(config: AppConfig, pathWithQuery: string): Promise<Reco
     return null;
   }
 
+  // TMDb hands out two credentials: the short v3 "API Key", which must go in
+  // the query string, and the long "API Read Access Token", sent as a bearer.
+  const isApiKey = /^[0-9a-f]{32}$/i.test(token);
+  const url = new URL(`https://api.themoviedb.org/3${pathWithQuery}`);
+  if (isApiKey) {
+    url.searchParams.set('api_key', token);
+  }
+
   try {
-    return await fetchJson<Record<string, unknown>>(`https://api.themoviedb.org/3${pathWithQuery}`, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+    return await fetchJson<Record<string, unknown>>(url.toString(), {
+      headers: isApiKey ? {} : { Authorization: `Bearer ${token}` }
     });
   } catch (err) {
     console.error(`TMDb fetch failed for ${pathWithQuery}:`, err);

@@ -3893,18 +3893,53 @@ img {
   font-size: 0.92rem;
 }
 
-.settings-optional-tag {
-  margin-left: 0.55rem;
-  color: #72809c;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  vertical-align: middle;
+.settings-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.settings-connection-label .settings-optional-tag {
-  margin-left: auto;
+.settings-card-footer {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settings-card-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  color: #c4cee0;
+  font-size: 0.9rem;
+}
+
+.settings-card-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: #68d391;
+  color: #07120d;
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.settings-card-check svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.settings-card-check:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: scale(1.08);
+}
+
+.settings-card-check:disabled {
+  opacity: 0.5;
 }
 
 .settings-card label,
@@ -4200,10 +4235,11 @@ img {
 }
 
 .administration-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 2.9rem 1fr 2.9rem;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
+  text-align: center;
   max-width: 76rem;
   margin: 0 auto 2rem;
 }

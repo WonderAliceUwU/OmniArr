@@ -82,7 +82,7 @@ export const api = {
     }),
   getSettings: () => request<AppConfig>('/api/settings'),
   saveSettings: (payload: AppConfig) =>
-    request<{ config: AppConfig }>('/api/settings', {
+    request<{ config: AppConfig; connections: ConnectionStatus[] }>('/api/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
