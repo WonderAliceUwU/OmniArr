@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { BlockList, isIP } from 'node:net';
 import { resolve } from 'node:path';
 import {
   defaultConfig,
@@ -695,8 +696,54 @@ function contentType(filePath: string): string {
   return 'application/octet-stream';
 }
 
+const PRIVATE_NETWORKS = new BlockList();
+PRIVATE_NETWORKS.addSubnet('127.0.0.0', 8, 'ipv4');
+PRIVATE_NETWORKS.addSubnet('10.0.0.0', 8, 'ipv4');
+PRIVATE_NETWORKS.addSubnet('172.16.0.0', 12, 'ipv4');
+PRIVATE_NETWORKS.addSubnet('192.168.0.0', 16, 'ipv4');
+PRIVATE_NETWORKS.addSubnet('169.254.0.0', 16, 'ipv4');
+PRIVATE_NETWORKS.addAddress('::1', 'ipv6');
+PRIVATE_NETWORKS.addSubnet('fc00::', 7, 'ipv6');
+PRIVATE_NETWORKS.addSubnet('fe80::', 10, 'ipv6');
+
+function normalizeAddress(address: string): string {
+  const trimmed = address.trim();
+  return trimmed.toLowerCase().startsWith('::ffff:') && isIP(trimmed.slice(7)) === 4 ? trimmed.slice(7) : trimmed;
+}
+
+function isPrivateAddress(address: string): boolean {
+  const version = isIP(address);
+  return version !== 0 && PRIVATE_NETWORKS.check(address, version === 4 ? 'ipv4' : 'ipv6');
+}
+
+// Behind a reverse proxy every request comes from the proxy's address, so the
+// forwarded client IP is used instead. It is only trusted when the connection
+// itself comes from a private network, where the proxy lives; requests from
+// the internet cannot spoof it.
 function getClientAddress(request: IncomingMessage): string {
-  return request.socket.remoteAddress || 'unknown';
+  const socketAddress = normalizeAddress(request.socket.remoteAddress || '');
+  if (!isPrivateAddress(socketAddress)) {
+    return socketAddress || 'unknown';
+  }
+
+  const forwardedFor = request.headers['x-forwarded-for'];
+  const realIp = request.headers['x-real-ip'];
+  const chain = (Array.isArray(forwardedFor) ? forwardedFor.join(',') : forwardedFor || (Array.isArray(realIp) ? realIp[0] : realIp) || '')
+    .split(',')
+    .map(normalizeAddress)
+    .filter((address) => isIP(address) !== 0);
+  if (chain.length === 0) {
+    return socketAddress;
+  }
+
+  // Each proxy appends the address it saw, so walk from the right and take the
+  // first public address; anything left of it could be forged by the client.
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    if (!isPrivateAddress(chain[index])) {
+      return chain[index];
+    }
+  }
+  return chain[0];
 }
 
 function trackFailedAttempt(address: string): void {
