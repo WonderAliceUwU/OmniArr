@@ -534,8 +534,20 @@ function getSessionToken(request: IncomingMessage): string | null {
   return null;
 }
 
+// Mark the cookie Secure only when the browser reached us over HTTPS, so plain
+// HTTP access on a LAN still works.
+function isSecureRequest(request: IncomingMessage): boolean {
+  if ('encrypted' in request.socket && request.socket.encrypted) {
+    return true;
+  }
+
+  const forwardedProto = request.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(',')[0].trim().toLowerCase();
+  return proto === 'https';
+}
+
 function setSessionCookie(request: IncomingMessage, response: ServerResponse, token: string): void {
-  const isSecure = request.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production';
+  const isSecure = isSecureRequest(request);
   response.setHeader(
     'Set-Cookie',
     `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${isSecure ? '; Secure' : ''}`
@@ -543,7 +555,7 @@ function setSessionCookie(request: IncomingMessage, response: ServerResponse, to
 }
 
 function clearSessionCookie(request: IncomingMessage, response: ServerResponse): void {
-  const isSecure = request.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production';
+  const isSecure = isSecureRequest(request);
   response.setHeader(
     'Set-Cookie',
     `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0${isSecure ? '; Secure' : ''}`
