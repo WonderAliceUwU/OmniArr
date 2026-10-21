@@ -5391,6 +5391,181 @@ img {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+.calendar-header {
+  position: relative;
+}
+
+/* Spans the header's content box (below its top padding) so the picker
+   centres on the same line as the month and arrows. */
+.calendar-timezone {
+  position: absolute;
+  top: 0.4rem;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  z-index: 20;
+}
+
+/* The trigger, menu and options follow the season selector in the title view. */
+.calendar-timezone-native {
+  display: none;
+}
+
+.calendar-timezone-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d6d8de;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition: color 180ms ease;
+}
+
+.calendar-timezone-button:hover,
+.calendar-timezone-button:focus-visible,
+.calendar-timezone-button[aria-expanded="true"] {
+  color: #ffffff;
+}
+
+.calendar-timezone-button .title-season-select-chevron {
+  margin-left: 0.2rem;
+}
+
+.calendar-timezone-button[aria-expanded="true"] .title-season-select-chevron {
+  transform: translateY(0.14rem) rotate(225deg);
+}
+
+.calendar-timezone-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+}
+
+.calendar-timezone-offset {
+  color: #72809c;
+  font-weight: 600;
+}
+
+.calendar-timezone-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  display: grid;
+  gap: 0.55rem;
+  width: min(20rem, calc(100vw - 3rem));
+  padding: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.8rem;
+  background: rgba(18, 22, 31, 0.98);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.32);
+}
+
+.calendar-timezone-search {
+  box-sizing: border-box;
+  padding: 0.62rem 0.85rem;
+  border-radius: 0.55rem;
+  font: inherit;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.calendar-timezone-options {
+  display: grid;
+  gap: 0.38rem;
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+}
+
+.calendar-timezone-options button {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.68rem 0.75rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: #b7c1d6;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.calendar-timezone-options button:hover,
+.calendar-timezone-options button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  outline: none;
+}
+
+.calendar-timezone-options button.is-selected {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.calendar-timezone-empty {
+  margin: 0;
+  padding: 0.68rem 0.75rem;
+  color: #72809c;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* On phones the picker mirrors the menu button: a square globe button in
+   the opposite corner, on the month row. An invisible native select on top
+   opens the phone's own picker, like the season selector. */
+@media (max-width: 980px) {
+  .calendar-timezone {
+    top: 0;
+  }
+
+  .calendar-timezone-button {
+    justify-content: center;
+    width: 2.9rem;
+    height: 2.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0.9rem;
+    background: rgba(10, 12, 16, 0.86);
+    box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.34);
+    pointer-events: none;
+  }
+
+  .calendar-timezone-button > :not(.calendar-timezone-icon),
+  .calendar-timezone-menu {
+    display: none;
+  }
+
+  .calendar-timezone-button .calendar-timezone-icon {
+    width: 1.2rem;
+    height: 1.2rem;
+    color: #f5f7fb;
+  }
+
+  .calendar-timezone-native {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    opacity: 0;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+}
+
 .calendar-container {
   flex: 1;
   min-height: 0;

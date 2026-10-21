@@ -3384,7 +3384,13 @@ function ArrowLeftGlyph() {
 function CalendarPage(props: {
   onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
 }) {
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [timeZoneOverride, setTimeZoneOverride] = useState(readStoredCalendarTimeZone);
+  const detectedTimeZone = getBrowserTimeZone();
+  const timeZone = timeZoneOverride || detectedTimeZone;
+  const [currentDate, setCurrentDate] = useState(() => {
+    const [year, month] = getDayKey(new Date(), timeZone).split('-').map(Number);
+    return new Date(year, month - 1, 1);
+  });
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -3393,9 +3399,11 @@ function CalendarPage(props: {
   const [monthTransition, setMonthTransition] = useState<'idle' | 'next' | 'prev'>('idle');
 
   useEffect(() => {
-    const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-    const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-    
+    // Pad the month by a day on each side so it is complete in any time zone;
+    // entries are then filtered by their day in the selected zone.
+    const start = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth(), 0));
+    const end = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth() + 1, 2));
+
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -3442,15 +3450,26 @@ function CalendarPage(props: {
 
   const now = new Date();
 
-  const filteredEntries = entries.filter(entry => {
-    const entryDate = new Date(entry.startsAt);
-    return entryDate.getFullYear() === currentDate.getFullYear() && entryDate.getMonth() === currentDate.getMonth();
-  });
+  const monthKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+  const filteredEntries = entries.filter(entry => getCalendarEntryDayKey(entry, timeZone).startsWith(monthKey));
 
   const nextUpEntry = filteredEntries.find(entry => new Date(entry.startsAt) >= now);
   const nextUpId = nextUpEntry?.id;
 
-  const groups = groupCalendarEntries(filteredEntries);
+  const groups = groupCalendarEntries(filteredEntries, timeZone);
+
+  function changeTimeZone(nextTimeZone: string | null) {
+    setTimeZoneOverride(nextTimeZone);
+    try {
+      if (nextTimeZone) {
+        localStorage.setItem(CALENDAR_TIME_ZONE_STORAGE_KEY, nextTimeZone);
+      } else {
+        localStorage.removeItem(CALENDAR_TIME_ZONE_STORAGE_KEY);
+      }
+    } catch {
+      // Storage can be unavailable (private mode); the choice still applies until reload.
+    }
+  }
 
   useLayoutEffect(() => {
     if (nextUpRef.current && scrollContainerRef.current) {
@@ -3489,6 +3508,11 @@ function CalendarPage(props: {
         <button className="calendar-nav-button" onClick={() => changeMonth(1)} disabled={monthTransition !== 'idle'}>
           <ArrowRightGlyph />
         </button>
+        <CalendarTimeZonePicker
+          detectedTimeZone={detectedTimeZone}
+          onChange={changeTimeZone}
+          override={timeZoneOverride}
+        />
       </div>
       <div className="calendar-container">
         <div className="calendar-scroll-container" ref={scrollContainerRef}>
@@ -3521,7 +3545,7 @@ function CalendarPage(props: {
                         <p className="calendar-entry-detail">{entry.detail}</p>
                       </div>
                       <div className="calendar-entry-time">
-                        <span>{formatCalendarTime(entry.startsAt)}</span>
+                        {isDateOnlyCalendarEntry(entry) ? null : <span>{formatCalendarTime(entry.startsAt, timeZone)}</span>}
                       </div>
                     </button>
                   ))}
@@ -3542,17 +3566,18 @@ function humanizeDownloadState(state: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-function groupCalendarEntries(entries: CalendarEntry[]) {
+function groupCalendarEntries(entries: CalendarEntry[], timeZone: string) {
+  // Day keys are already in the selected zone, so the label is formatted as UTC.
   const formatter = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
+    timeZone: 'UTC',
   })
   const grouped = new Map<string, { key: string; label: string; items: CalendarEntry[] }>()
 
   for (const entry of entries) {
-    const date = new Date(entry.startsAt)
-    const key = date.toISOString().slice(0, 10)
+    const key = getCalendarEntryDayKey(entry, timeZone)
     const current = grouped.get(key)
     if (current) {
       current.items.push(entry)
@@ -3560,21 +3585,205 @@ function groupCalendarEntries(entries: CalendarEntry[]) {
     }
     grouped.set(key, {
       key,
-      label: formatter.format(date),
+      label: formatter.format(new Date(`${key}T12:00:00Z`)),
       items: [entry],
     })
   }
 
-  return [...grouped.values()]
+  return [...grouped.values()].sort((left, right) => left.key.localeCompare(right.key))
 }
 
-function formatCalendarTime(startsAt: string) {
+function formatCalendarTime(startsAt: string, timeZone: string) {
   const date = new Date(startsAt)
   return new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: false,
+    timeZone,
   }).format(date)
+}
+
+const CALENDAR_TIME_ZONE_STORAGE_KEY = 'omniarr.calendar.timeZone'
+
+function getBrowserTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+function isValidTimeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function readStoredCalendarTimeZone(): string | null {
+  try {
+    const stored = localStorage.getItem(CALENDAR_TIME_ZONE_STORAGE_KEY)
+    return stored && isValidTimeZone(stored) ? stored : null
+  } catch {
+    return null
+  }
+}
+
+function getSupportedTimeZones(detectedTimeZone: string) {
+  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
+  return zones.includes(detectedTimeZone) ? zones : [detectedTimeZone, ...zones]
+}
+
+function getDayKey(date: Date, timeZone: string) {
+  // en-CA formats dates as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone }).format(date)
+}
+
+// Radarr release dates and Sonarr's fallback airDate are calendar days, not
+// instants, so they keep their day instead of shifting with the time zone.
+function isDateOnlyCalendarEntry(entry: CalendarEntry) {
+  return entry.kind === 'movie' || !entry.startsAt.includes('T')
+}
+
+function getCalendarEntryDayKey(entry: CalendarEntry, timeZone: string) {
+  return isDateOnlyCalendarEntry(entry) ? entry.startsAt.slice(0, 10) : getDayKey(new Date(entry.startsAt), timeZone)
+}
+
+function formatTimeZoneCity(timeZone: string) {
+  return (timeZone.split('/').pop() || timeZone).replace(/_/g, ' ')
+}
+
+function formatTimeZoneOffset(timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(new Date())
+  return parts.find((part) => part.type === 'timeZoneName')?.value || ''
+}
+
+function CalendarTimeZonePicker(props: {
+  detectedTimeZone: string
+  override: string | null
+  onChange: (timeZone: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const pickerRef = useRef<HTMLDivElement | null>(null)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const timeZone = props.override || props.detectedTimeZone
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    // autoFocus would scroll the page to the menu; focus without moving it.
+    searchRef.current?.focus({ preventScroll: true })
+
+    function closeOnOutsidePress(event: PointerEvent) {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', closeOnOutsidePress)
+    window.addEventListener('keydown', closeOnEscape)
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsidePress)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  const allZones = getSupportedTimeZones(props.detectedTimeZone)
+  const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, '_')
+  const zones = open ? allZones.filter((zone) => zone.toLowerCase().includes(normalizedQuery)) : []
+
+  function choose(nextTimeZone: string | null) {
+    props.onChange(nextTimeZone)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div className="calendar-timezone" ref={pickerRef}>
+      {/* Phones get the native picker, like the season selector. */}
+      <select
+        aria-label="Time zone"
+        className="calendar-timezone-native"
+        onChange={(event) => props.onChange(event.target.value || null)}
+        value={props.override || ''}
+      >
+        <option value="">Automatic · {formatTimeZoneCity(props.detectedTimeZone)}</option>
+        {allZones.map((zone) => (
+          <option key={zone} value={zone}>{zone.replace(/_/g, ' ')} ({formatTimeZoneOffset(zone)})</option>
+        ))}
+      </select>
+      <button
+        aria-controls="calendar-timezone-options"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="calendar-timezone-button"
+        onClick={() => setOpen((current) => !current)}
+        title={timeZone}
+        type="button"
+      >
+        <GlobeGlyph />
+        <span>{formatTimeZoneCity(timeZone)}</span>
+        <span className="calendar-timezone-offset">{formatTimeZoneOffset(timeZone)}</span>
+        <span aria-hidden="true" className="title-season-select-chevron" />
+      </button>
+      {open ? (
+        <div className="calendar-timezone-menu">
+          <input
+            aria-label="Search time zones"
+            className="input calendar-timezone-search"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search city or zone"
+            ref={searchRef}
+            value={query}
+          />
+          <div aria-label="Time zones" className="calendar-timezone-options" id="calendar-timezone-options" role="listbox">
+            {normalizedQuery ? null : (
+              <button
+                aria-selected={!props.override}
+                className={props.override ? '' : 'is-selected'}
+                onClick={() => choose(null)}
+                role="option"
+                type="button"
+              >
+                <span>Automatic</span>
+                <span className="calendar-timezone-offset">{formatTimeZoneCity(props.detectedTimeZone)}</span>
+              </button>
+            )}
+            {zones.map((zone) => (
+              <button
+                aria-selected={props.override === zone}
+                className={props.override === zone ? 'is-selected' : ''}
+                key={zone}
+                onClick={() => choose(zone)}
+                role="option"
+                type="button"
+              >
+                <span>{zone.replace(/_/g, ' ')}</span>
+                <span className="calendar-timezone-offset">{formatTimeZoneOffset(zone)}</span>
+              </button>
+            ))}
+            {zones.length === 0 && normalizedQuery ? <p className="calendar-timezone-empty">No matching time zones</p> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function GlobeGlyph() {
+  return (
+    <svg aria-hidden="true" className="calendar-timezone-icon" viewBox="0 0 16 16">
+      <path d="M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5Zm4.7 5.5h-2.2a10.3 10.3 0 0 0-.9-3.85 4.77 4.77 0 0 1 3.1 3.85ZM8 3.3c.5.6 1.3 2.05 1.48 3.95H6.52C6.7 5.35 7.5 3.9 8 3.3ZM6.4 3.4a10.3 10.3 0 0 0-.9 3.85H3.3a4.77 4.77 0 0 1 3.1-3.85ZM3.3 8.75h2.2c.08 1.45.42 2.8.9 3.85a4.77 4.77 0 0 1-3.1-3.85ZM8 12.7c-.5-.6-1.3-2.05-1.48-3.95h2.96C9.3 10.65 8.5 12.1 8 12.7Zm1.6-.1c.48-1.05.82-2.4.9-3.85h2.2a4.77 4.77 0 0 1-3.1 3.85Z" fill="currentColor" />
+    </svg>
+  )
 }
 
 function AdministrationScreen(props: {
