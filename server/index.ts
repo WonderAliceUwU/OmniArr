@@ -180,16 +180,20 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
   }
 
   if (url.pathname === '/api/auth/profiles' && method === 'GET') {
+    let config: AppConfig;
     try {
-      const config = await readConfig();
-      const [jellyfinUsers, connections] = await Promise.all([
-        loadJellyfinUsers(config.jellyfin.baseUrl, config.jellyfin.apiKey),
-        getConnectionStatuses(config)
-      ]);
-      sendJson(response, 200, { jellyfinUsers, connections });
+      config = await readConfig();
     } catch {
       sendJson(response, 409, { error: 'An administrator must sign in once to migrate the existing configuration.' });
+      return;
     }
+    // A Jellyfin outage is reported through the connection status, so the
+    // client can show it instead of an empty profile list.
+    const [jellyfinUsers, connections] = await Promise.all([
+      loadJellyfinUsers(config.jellyfin.baseUrl, config.jellyfin.apiKey).catch(() => []),
+      getConnectionStatuses(config)
+    ]);
+    sendJson(response, 200, { jellyfinUsers, connections });
     return;
   }
 

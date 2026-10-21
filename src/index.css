@@ -289,6 +289,10 @@ img {
   background: #ff5d73;
 }
 
+.status-dot.off {
+  background: #4a5468;
+}
+
 .sidebar-footer {
   margin-top: auto;
   display: grid;
@@ -3889,6 +3893,20 @@ img {
   font-size: 0.92rem;
 }
 
+.settings-optional-tag {
+  margin-left: 0.55rem;
+  color: #72809c;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.settings-connection-label .settings-optional-tag {
+  margin-left: auto;
+}
+
 .settings-card label,
 .auth-form label {
   display: grid;
@@ -4148,6 +4166,30 @@ img {
 .profiles-actions {
   display: flex;
   justify-content: center;
+}
+
+.jellyfin-unavailable {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  width: min(100%, 32rem);
+  margin: 0 auto;
+  padding: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.3rem;
+  color: #c4cee0;
+  text-align: center;
+}
+
+.jellyfin-unavailable p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.jellyfin-unavailable-detail {
+  color: #72809c;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
 }
 
 .administration-layout {

@@ -435,12 +435,14 @@ export async function getServiceOptions(config: AppConfig): Promise<ServiceOptio
     radarrRootFolders,
     radarrQualityProfiles
   ] = await Promise.all([
-    getJellyfinUsers(config),
-    getSonarrRootFolders(config),
-    getSonarrQualityProfiles(config),
-    getSonarrLanguageProfiles(config),
-    getRadarrRootFolders(config),
-    getRadarrQualityProfiles(config)
+    // A service that is down only empties its own options; the connection
+    // status reports the failure.
+    getJellyfinUsers(config).catch(() => []),
+    getSonarrRootFolders(config).catch(() => []),
+    getSonarrQualityProfiles(config).catch(() => []),
+    getSonarrLanguageProfiles(config).catch(() => []),
+    getRadarrRootFolders(config).catch(() => []),
+    getRadarrQualityProfiles(config).catch(() => [])
   ]);
 
   return {
@@ -558,7 +560,9 @@ export async function authenticateJellyfinUser(config: AppConfig, userId: string
 export async function getDashboard(config: AppConfig): Promise<DashboardResponse> {
   const [connections, library, downloads, tmdb] = await Promise.all([
     getConnectionStatuses(config),
-    getLibrarySnapshot(config),
+    // If Jellyfin is down the client shows its unavailable screen from the
+    // connection status, so don't fail the whole dashboard here.
+    getLibrarySnapshot(config).catch(() => ({ continueWatching: [], recentlyAdded: [], allItems: [] })),
     getDownloads(config),
     getTmdbSnapshot(config)
   ]);
@@ -3757,131 +3761,74 @@ async function getRadarrCalendar(config: AppConfig, start: Date, end: Date): Pro
   )
 }
 
-async function testJellyfin(config: AppConfig): Promise<ConnectionStatus> {
-  if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
-    return {
-      key: 'jellyfin',
-      label: 'Jellyfin',
-      ok: false,
-      message: 'Not configured'
-    };
+async function testService(
+  key: ConnectionStatus['key'],
+  label: string,
+  optional: boolean,
+  required: Array<[name: string, value: string]>,
+  check: () => Promise<void>
+): Promise<ConnectionStatus> {
+  const missing = required.filter(([, value]) => !value.trim()).map(([name]) => name);
+  if (missing.length === required.length) {
+    return { key, label, ok: false, message: 'Not configured', configured: false, optional };
+  }
+  if (missing.length) {
+    return { key, label, ok: false, message: `Incomplete: missing ${missing.join(' and ')}`, configured: false, optional, incomplete: true };
   }
 
   try {
+    await check();
+    return { key, label, ok: true, message: 'Connected', configured: true, optional };
+  } catch (error) {
+    const message = errorMessage(error);
+    // Node reports network errors as a bare "fetch failed".
+    return { key, label, ok: false, message: message === 'fetch failed' ? `Can't reach ${label}` : message, configured: true, optional };
+  }
+}
+
+function testJellyfin(config: AppConfig): Promise<ConnectionStatus> {
+  return testService('jellyfin', 'Jellyfin', false, [['URL', config.jellyfin.baseUrl], ['API key', config.jellyfin.apiKey]], async () => {
     await fetchJson(`${config.jellyfin.baseUrl}/System/Info`, {
       headers: {
         Authorization: `MediaBrowser Token="${config.jellyfin.apiKey}"`
       }
     });
-    return { key: 'jellyfin', label: 'Jellyfin', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'jellyfin',
-      label: 'Jellyfin',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
+  });
 }
 
-async function testSonarr(config: AppConfig): Promise<ConnectionStatus> {
-  if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
-    return {
-      key: 'sonarr',
-      label: 'Sonarr',
-      ok: false,
-      message: 'Not configured'
-    };
-  }
-
-  try {
+function testSonarr(config: AppConfig): Promise<ConnectionStatus> {
+  return testService('sonarr', 'Sonarr', true, [['URL', config.sonarr.baseUrl], ['API key', config.sonarr.apiKey]], async () => {
     await fetchJson(`${config.sonarr.baseUrl}/api/v3/health`, {
       headers: {
         'X-Api-Key': config.sonarr.apiKey
       }
     });
-    return { key: 'sonarr', label: 'Sonarr', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'sonarr',
-      label: 'Sonarr',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
+  });
 }
 
-async function testRadarr(config: AppConfig): Promise<ConnectionStatus> {
-  if (!config.radarr.baseUrl || !config.radarr.apiKey) {
-    return {
-      key: 'radarr',
-      label: 'Radarr',
-      ok: false,
-      message: 'Not configured'
-    };
-  }
-
-  try {
+function testRadarr(config: AppConfig): Promise<ConnectionStatus> {
+  return testService('radarr', 'Radarr', true, [['URL', config.radarr.baseUrl], ['API key', config.radarr.apiKey]], async () => {
     await fetchJson(`${config.radarr.baseUrl}/api/v3/health`, {
       headers: {
         'X-Api-Key': config.radarr.apiKey
       }
     });
-    return { key: 'radarr', label: 'Radarr', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'radarr',
-      label: 'Radarr',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
+  });
 }
 
-async function testTmdb(config: AppConfig): Promise<ConnectionStatus> {
-  if (!getTmdbToken(config)) {
-    return {
-      key: 'tmdb',
-      label: 'TMDb',
-      ok: false,
-      message: 'Missing token'
-    };
-  }
-
-  try {
-    await tmdbFetch(config, '/configuration');
-    return { key: 'tmdb', label: 'TMDb', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'tmdb',
-      label: 'TMDb',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
+function testTmdb(config: AppConfig): Promise<ConnectionStatus> {
+  return testService('tmdb', 'TMDb', true, [['token', getTmdbToken(config)]], async () => {
+    // tmdbFetch swallows errors and returns null, so treat that as a failure.
+    if (!await tmdbFetch(config, '/configuration')) {
+      throw new Error('TMDb rejected the token or is unreachable');
+    }
+  });
 }
 
-async function testTvdb(config: AppConfig): Promise<ConnectionStatus> {
-  if (!getTvdbApiKey(config)) {
-    return {
-      key: 'tvdb',
-      label: 'TVDB',
-      ok: false,
-      message: 'Missing API key'
-    };
-  }
-
-  try {
+function testTvdb(config: AppConfig): Promise<ConnectionStatus> {
+  return testService('tvdb', 'TVDB', true, [['API key', getTvdbApiKey(config)]], async () => {
     await getTvdbToken(config);
-    return { key: 'tvdb', label: 'TVDB', ok: true, message: 'Connected' };
-  } catch (error) {
-    return {
-      key: 'tvdb',
-      label: 'TVDB',
-      ok: false,
-      message: errorMessage(error)
-    };
-  }
+  });
 }
 
 async function jellyfinFetch<T>(config: AppConfig, pathWithQuery: string): Promise<T> {

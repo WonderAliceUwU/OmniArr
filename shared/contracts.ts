@@ -86,6 +86,12 @@ export interface ConnectionStatus {
   label: string;
   ok: boolean;
   message: string;
+  /** Every field the service needs is filled in. */
+  configured: boolean;
+  /** The app works without it; only Jellyfin is required. */
+  optional: boolean;
+  /** Some of its fields are filled in but not all of them. */
+  incomplete?: boolean;
 }
 
 export interface DiskSpaceStatus {

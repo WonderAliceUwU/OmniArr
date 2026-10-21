@@ -286,6 +286,24 @@ function App() {
     }
   }
 
+  async function handleRetryJellyfin() {
+    setBusy(true)
+    setError('')
+    try {
+      if (authState === 'app') {
+        await refreshBaseData()
+      } else {
+        const profiles = await api.getProfiles()
+        setOptions((current) => ({ ...current, jellyfinUsers: profiles.jellyfinUsers }))
+        setConnections(profiles.connections)
+      }
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : 'Failed to reach Jellyfin.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleLoadJellyfinUsers() {
     setJellyfinUsersBusy(true)
     setError('')
@@ -454,15 +472,31 @@ function App() {
     )
   }
 
+  const jellyfinStatus = getServiceStatus(connections, 'jellyfin')
+  const openAdministration = () => setAuthState(sessionRole === 'admin' ? 'admin' : 'login')
+
+  // Jellyfin is required: without it there are no profiles or library to show.
+  if ((authState === 'profiles' || (authState === 'app' && jellyfinStatus?.configured)) && isJellyfinUnavailable(connections)) {
+    return (
+      <JellyfinUnavailableScreen
+        busy={busy}
+        error={error}
+        onAdmin={openAdministration}
+        onRetry={() => void handleRetryJellyfin()}
+        status={jellyfinStatus}
+      />
+    )
+  }
+
   if (authState === 'profiles') {
     return (
       <ProfileSelectionScreen
         busy={busy}
         currentUserId=""
-        hasServiceFailure={connections.some((connection) => !connection.ok)}
+        hasServiceFailure={hasFailingService(connections)}
         error={error}
         notice={notice}
-        onAdmin={() => setAuthState(sessionRole === 'admin' ? 'admin' : 'login')}
+        onAdmin={openAdministration}
         onSelectUser={handleSelectJellyfinUser}
         users={options.jellyfinUsers}
       />
@@ -509,10 +543,10 @@ function App() {
         <ProfileSelectionScreen
           busy={busy}
           currentUserId={sessionRole === 'user' ? config.jellyfin.userId : ''}
-          hasServiceFailure={connections.some((connection) => !connection.ok)}
+          hasServiceFailure={hasFailingService(connections)}
           error={error}
           notice={notice}
-          onAdmin={() => setAuthState(sessionRole === 'admin' ? 'admin' : 'login')}
+          onAdmin={openAdministration}
           onContinue={() => void transitionEntryStage('dashboard')}
           onSelectUser={handleSelectJellyfinUser}
           users={options.jellyfinUsers}
@@ -547,8 +581,14 @@ function App() {
               {error ? <p className="error-banner">{error}</p> : null}
             </div>
 
-            {route === 'calendar' ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
-            {route === 'downloads' ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} processingItems={processingItems} /> : null}
+            {(route === 'calendar' || route === 'downloads') && !isRouteAvailable(route, connections) ? (
+              <EmptyState
+                copy="Connect Sonarr or Radarr in Administration to see upcoming releases and downloads."
+                title="Nothing to track yet"
+              />
+            ) : null}
+            {route === 'calendar' && isRouteAvailable(route, connections) ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
+            {route === 'downloads' && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} processingItems={processingItems} /> : null}
             {route === 'search' ? (
               <SearchPage
                 loading={searchLoading}
@@ -597,6 +637,7 @@ function App() {
           originRect={selectedCard.originRect}
           onRequest={handleRequest}
           currentUser={currentJellyfinUser}
+          services={{ sonarr: isServiceConfigured(connections, 'sonarr'), radarr: isServiceConfigured(connections, 'radarr') }}
         />
       ) : null}
     </div>
@@ -622,7 +663,7 @@ function Sidebar(props: {
   onExitProfile: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const hasServiceFailure = props.connections.some((connection) => !connection.ok)
+  const hasServiceFailure = hasFailingService(props.connections)
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -679,7 +720,7 @@ function Sidebar(props: {
           </button>
 
         <div className="sidebar-links">
-          {topSidebarItems.map((item) => (
+          {topSidebarItems.filter((item) => isRouteAvailable(item.route, props.connections)).map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
@@ -1084,6 +1125,83 @@ function ProfileSelectionScreen(props: {
           </span>
         </button>
       </div> : null}
+    </div>
+  )
+}
+
+function getServiceStatus(connections: ConnectionStatus[], key: ConnectionStatus['key']) {
+  return connections.find((connection) => connection.key === key)
+}
+
+// Features that depend on Sonarr or Radarr are shown whenever the service is
+// configured; if it is down, the action itself reports the error.
+function isServiceConfigured(connections: ConnectionStatus[], key: ConnectionStatus['key']) {
+  return Boolean(getServiceStatus(connections, key)?.configured)
+}
+
+// Optional services that aren't set up are not failures; broken or half
+// filled-in ones are.
+function hasFailingService(connections: ConnectionStatus[]) {
+  return connections.some((connection) => getConnectionDotState(connection) === 'down')
+}
+
+// Upcoming and Downloads only make sense with Sonarr or Radarr behind them.
+function isRouteAvailable(route: AppRoute, connections: ConnectionStatus[]) {
+  if (route === 'calendar' || route === 'downloads') {
+    return isServiceConfigured(connections, 'sonarr') || isServiceConfigured(connections, 'radarr')
+  }
+  return true
+}
+
+// Grey for an optional service nobody set up, red for anything broken.
+function getConnectionDotState(connection: ConnectionStatus) {
+  if (connection.ok) {
+    return 'ok'
+  }
+  return connection.optional && !connection.configured && !connection.incomplete ? 'off' : 'down'
+}
+
+function isJellyfinUnavailable(connections: ConnectionStatus[]) {
+  const jellyfin = getServiceStatus(connections, 'jellyfin')
+  return Boolean(jellyfin && !jellyfin.ok)
+}
+
+function JellyfinUnavailableScreen(props: {
+  status?: ConnectionStatus
+  busy: boolean
+  error: string
+  onRetry: () => void
+  onAdmin: () => void
+}) {
+  const configured = Boolean(props.status?.configured)
+
+  return (
+    <div className="profiles-layout">
+      <div className="profiles-header">
+        <h1>{configured ? 'Jellyfin is unavailable' : 'Jellyfin is not set up'}</h1>
+        {props.error ? <p className="error-banner">{props.error}</p> : null}
+      </div>
+      <div className="jellyfin-unavailable">
+        <p>
+          {configured
+            ? 'OmniArr can\'t reach your Jellyfin server, so profiles and your library can\'t load.'
+            : 'OmniArr needs a Jellyfin server to show profiles and your library. An administrator has to connect it.'}
+        </p>
+        {configured && props.status?.message ? <p className="jellyfin-unavailable-detail">{props.status.message}</p> : null}
+        {configured ? (
+          <button className="secondary-button" disabled={props.busy} onClick={props.onRetry} type="button">
+            {props.busy ? 'Checking…' : 'Try again'}
+          </button>
+        ) : null}
+      </div>
+      <div className="profiles-actions">
+        <button aria-label="Administration" className="profile-admin-button" onClick={props.onAdmin} title="Administration" type="button">
+          <span className="profile-admin-icon">
+            <SettingsGlyph />
+            <span className="profile-admin-status down" />
+          </span>
+        </button>
+      </div>
     </div>
   )
 }
@@ -1570,6 +1688,8 @@ function TitleDetailsModal(props: {
   onRequest: (card: MediaCard, qualityProfileId?: number, seasonNumber?: number) => Promise<void>
   currentUser: string | null
   qualityProfiles: { sonarr: SelectOption[]; radarr: SelectOption[] }
+  /** Which download services are configured; their actions are hidden otherwise. */
+  services: { sonarr: boolean; radarr: boolean }
 }) {
   const [details, setDetails] = useState<TitleDetailsResponse | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(true)
@@ -1903,7 +2023,7 @@ function TitleDetailsModal(props: {
     : details?.requestStatus || 'idle'
   const movieRequestProgress = details?.requestProgress || 0
   const isMovieRequestActive = details?.mediaType === 'movie' && (movieRequestStatus === 'processing' || movieRequestStatus === 'downloading')
-  const canDeleteMovieAction = Boolean(details?.mediaType === 'movie' && details.radarrMovieId)
+  const canDeleteMovieAction = Boolean(props.services.radarr && details?.mediaType === 'movie' && details.radarrMovieId)
   const activeSeasonNumber = effectiveActiveSeasonMeta?.seasonNumber
   const activeSeasonDownloadStatus = effectiveActiveSeasonMeta?.downloadStatus || 'idle'
   const currentSeasonIndex = details?.seasons.findIndex((season) => season.id === seasonValue) ?? -1
@@ -1921,7 +2041,7 @@ function TitleDetailsModal(props: {
           }
         : episode)
     : []
-  const canDownloadSeasonAction = Boolean(
+  const canDownloadSeasonAction = props.services.sonarr && Boolean(
     activeSeasonDownloadStatus === 'processing'
     || activeSeasonDownloadStatus === 'downloading'
     || (details?.sonarrSeriesId && typeof activeSeasonNumber === 'number' && activeSeasonNumber > 0)
@@ -1932,7 +2052,7 @@ function TitleDetailsModal(props: {
   const isSeasonFullyDownloadedExceptUnaired = episodesForSeason.length > 0 && episodesForSeason.every(
     (episode) => episode.availability === 'available' || episode.availability === 'unaired'
   );
-  const canDeleteSeasonAction = (Boolean(effectiveActiveSeasonMeta?.canDelete) || isSeasonFullyDownloadedExceptUnaired);
+  const canDeleteSeasonAction = props.services.sonarr && (Boolean(effectiveActiveSeasonMeta?.canDelete) || isSeasonFullyDownloadedExceptUnaired);
   const shouldShowDownloadSeasonAction = canDownloadSeasonAction && !canDeleteSeasonAction;
 
   useEffect(() => {
@@ -2484,7 +2604,7 @@ function TitleDetailsModal(props: {
                           <TrashGlyph />
                         </ActionButton>
                       ) : null}
-                      {!canPlay && canRequest && details?.mediaType !== 'series' ? (
+                      {!canPlay && canRequest && props.services.radarr && details?.mediaType !== 'series' ? (
                         isMovieRequestActive ? (
                           movieRequestStatus === 'downloading' ? (
                             <div
@@ -2739,7 +2859,7 @@ function TitleDetailsModal(props: {
                               <div className="episode-card-title-row">
                                 <strong>{episode.title}</strong>
                                 <div className="episode-card-state-icons">
-                                {episode.canDownload || episode.downloadStatus === 'processing' || episode.downloadStatus === 'downloading' ? (
+                                {props.services.sonarr && (episode.canDownload || episode.downloadStatus === 'processing' || episode.downloadStatus === 'downloading') ? (
                                   episode.downloadStatus === 'downloading' ? (
                                     <span
                                       aria-label="Episode downloading"
@@ -3836,8 +3956,9 @@ function SettingsView(props: {
           {props.connections.map((connection) => (
             <div className="settings-connection" key={connection.key} title={connection.message}>
               <div className="settings-connection-label">
-                <span className={connection.ok ? 'status-dot ok' : 'status-dot down'} />
+                <span className={`status-dot ${getConnectionDotState(connection)}`} />
                 <strong>{connection.label}</strong>
+                {connection.optional ? <span className="settings-optional-tag">Optional</span> : null}
               </div>
               <span className="settings-connection-message">{connection.message}</span>
             </div>
@@ -3865,7 +3986,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard title="Sonarr">
+      <SettingsCard optional title="Sonarr">
         <ServiceFields
           apiKey={props.config.sonarr.apiKey}
           baseUrl={props.config.sonarr.baseUrl}
@@ -3882,7 +4003,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard title="Radarr">
+      <SettingsCard optional title="Radarr">
         <ServiceFields
           apiKey={props.config.radarr.apiKey}
           baseUrl={props.config.radarr.baseUrl}
@@ -3899,14 +4020,14 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard title="TMDb">
+      <SettingsCard optional title="TMDb">
         <label>
           Bearer token
           <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="Enter your TMDb bearer token" value={props.config.tmdb.bearerToken} />
         </label>
       </SettingsCard>
 
-      <SettingsCard title="TVDB">
+      <SettingsCard optional title="TVDB">
         <label>
           API key
           <input className="input" onChange={(event) => props.updateConfig('tvdb', { apiKey: event.target.value })} placeholder="Optional if already provided via TVDB_API_KEY" value={props.config.tvdb.apiKey} />
@@ -3922,10 +4043,13 @@ function SettingsView(props: {
   )
 }
 
-function SettingsCard({ title, children }: { title: string; children: ReactNode }) {
+function SettingsCard({ title, optional, children }: { title: string; optional?: boolean; children: ReactNode }) {
   return (
     <section className="settings-card">
-      <h2>{title}</h2>
+      <h2>
+        {title}
+        {optional ? <span className="settings-optional-tag">Optional</span> : null}
+      </h2>
       <div className="settings-fields">{children}</div>
     </section>
   )
