@@ -256,7 +256,8 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/settings' && method === 'PUT') {
     const body = await readJson<AppConfig>(request);
-    const config = sanitizeConfig(body);
+    const sanitized = sanitizeConfig(body);
+    const config = { ...sanitized, jellyfin: { ...sanitized.jellyfin, userId: '' } };
     await updateEncryptedConfig(encryptJson(config, await getConfigEncryptionKey()));
     const connections = await getConnectionStatuses(config);
     sendJson(response, 200, {
@@ -603,8 +604,10 @@ async function readConfig(legacyEncryptionKey?: Buffer): Promise<AppConfig> {
       ...(stored.tvdb || {})
     }
   });
+  // The Jellyfin user always comes from the profile the session signed in
+  // with; admin sessions have none, so a userId saved by older versions is ignored.
   const userId = legacyEncryptionKey ? sessionUsers.get(legacyEncryptionKey) : undefined;
-  return userId ? { ...config, jellyfin: { ...config.jellyfin, userId } } : config;
+  return { ...config, jellyfin: { ...config.jellyfin, userId: userId || '' } };
 }
 
 async function getConfigEncryptionKey(): Promise<Buffer> {

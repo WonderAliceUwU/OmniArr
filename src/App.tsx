@@ -475,9 +475,7 @@ function App() {
         busy={busy}
         config={config}
         connections={connections}
-        jellyfinUsersBusy={jellyfinUsersBusy}
         onExit={() => setAuthState('profiles')}
-        onLoadJellyfinUsers={handleLoadJellyfinUsers}
         onSave={handleSaveSettings}
         options={options}
         updateConfig={updateConfig}
@@ -567,8 +565,6 @@ function App() {
                 busy={busy}
                 config={config}
                 connections={connections}
-                jellyfinUsersBusy={jellyfinUsersBusy}
-                onLoadJellyfinUsers={handleLoadJellyfinUsers}
                 onSave={handleSaveSettings}
                 options={options}
                 updateConfig={updateConfig}
@@ -3789,9 +3785,7 @@ function GlobeGlyph() {
 function AdministrationScreen(props: {
   config: AppConfig
   connections: ConnectionStatus[]
-  jellyfinUsersBusy: boolean
   onExit: () => void
-  onLoadJellyfinUsers: () => Promise<void>
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
@@ -3815,8 +3809,6 @@ function AdministrationScreen(props: {
         busy={props.busy}
         config={props.config}
         connections={props.connections}
-        jellyfinUsersBusy={props.jellyfinUsersBusy}
-        onLoadJellyfinUsers={props.onLoadJellyfinUsers}
         onSave={props.onSave}
         options={props.options}
         formId="administration-settings"
@@ -3830,8 +3822,6 @@ function AdministrationScreen(props: {
 function SettingsView(props: {
   config: AppConfig
   connections: ConnectionStatus[]
-  jellyfinUsersBusy: boolean
-  onLoadJellyfinUsers: () => Promise<void>
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
@@ -3873,18 +3863,6 @@ function SettingsView(props: {
           onApiKeyChange={(apiKey) => props.updateConfig('jellyfin', { ...props.config.jellyfin, apiKey })}
           onBaseUrlChange={(baseUrl) => props.updateConfig('jellyfin', { ...props.config.jellyfin, baseUrl })}
         />
-        <div className="inline-actions">
-          <button className="secondary-button" disabled={props.jellyfinUsersBusy || !props.config.jellyfin.baseUrl.trim() || !props.config.jellyfin.apiKey.trim()} onClick={() => void props.onLoadJellyfinUsers()} type="button">
-            {props.jellyfinUsersBusy ? 'Loading users…' : 'Load users'}
-          </button>
-        </div>
-        <label>
-          User
-          <select className="input" onChange={(event) => props.updateConfig('jellyfin', { ...props.config.jellyfin, userId: event.target.value })} value={props.config.jellyfin.userId}>
-            <option value="">Select user</option>
-            {props.options.jellyfinUsers.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-          </select>
-        </label>
       </SettingsCard>
 
       <SettingsCard title="Sonarr">
