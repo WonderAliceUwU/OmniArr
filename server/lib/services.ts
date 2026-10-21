@@ -151,6 +151,7 @@ interface JellyfinItem {
 interface SonarrQueueRecord {
   id?: number;
   seriesId?: number;
+  episodeId?: number;
   title?: string;
   downloadId?: string;
   series?: { title?: string; tmdbId?: number; images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }> };
@@ -862,7 +863,8 @@ export async function removeDownload(config: AppConfig, id: string): Promise<voi
   const queueItem = queue.find((item) => String(item.id) === rawId);
 
   const response = await fetch(
-    `${baseUrl}/api/v3/queue/${encodeURIComponent(rawId)}?removeFromClient=true&blocklist=false&skipRedownload=false`,
+    // skipRedownload: cancelling must not make Sonarr/Radarr grab another release.
+    `${baseUrl}/api/v3/queue/${encodeURIComponent(rawId)}?removeFromClient=true&blocklist=false&skipRedownload=true`,
     {
       method: 'DELETE',
       headers: {
@@ -889,6 +891,16 @@ export async function removeDownload(config: AppConfig, id: string): Promise<voi
   }
 
   if (source === 'sonarr' && queueItem) {
+    // A season pack shows up as one queue record per episode sharing a
+    // download; removing one cancels them all, so unmonitor all of them.
+    const sonarrQueue = queue as SonarrQueueRecord[];
+    const downloadId = (queueItem as SonarrQueueRecord).downloadId;
+    const cancelledEpisodeIds = sonarrQueue
+      .filter((item) => item === queueItem || (downloadId && item.downloadId === downloadId))
+      .map((item) => item.episodeId)
+      .filter((episodeId): episodeId is number => typeof episodeId === 'number');
+    await setSonarrEpisodesMonitored(config, [...new Set(cancelledEpisodeIds)], false);
+
     const seriesId = (queueItem as SonarrQueueRecord).seriesId;
     const title = (queueItem as SonarrQueueRecord).series?.title || queueItem.title;
     if (title) {
@@ -1835,6 +1847,76 @@ async function getSonarrSeriesRecord(
   return response.find((series) => series.id && (!tmdbId || !series.tmdbId || series.tmdbId === tmdbId)) || response[0] || null;
 }
 
+// Download and delete are one-click actions, so OmniArr owns the monitoring:
+// whatever the user downloads is monitored (so Sonarr/Radarr keep looking if
+// nothing is available yet), and whatever they delete or cancel is not (so it
+// isn't downloaded again).
+
+async function setSonarrEpisodesMonitored(config: AppConfig, episodeIds: number[], monitored: boolean): Promise<void> {
+  if (!episodeIds.length) {
+    return;
+  }
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/episode/monitor`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ episodeIds, monitored })
+  });
+}
+
+// Sonarr cascades a season's monitored flag to its episodes when the series is
+// saved with that flag changed.
+async function setSonarrSeasonMonitored(
+  config: AppConfig,
+  series: SonarrSeriesRecord,
+  seasonNumber: number,
+  monitored: boolean
+): Promise<void> {
+  const seasons = (series.seasons || []).map((season) =>
+    season.seasonNumber === seasonNumber ? { ...season, monitored } : season
+  );
+
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(series.id))}`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ ...series, monitored: monitored || series.monitored, seasons })
+  });
+}
+
+async function ensureSonarrSeriesMonitored(config: AppConfig, seriesId: number): Promise<void> {
+  const series = await getSonarrSeriesById(config, seriesId);
+  if (!series?.id || series.monitored) {
+    return;
+  }
+
+  // Seasons are sent unchanged, so no episode monitoring changes with it.
+  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(series.id))}`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.sonarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ ...series, monitored: true })
+  });
+}
+
+async function setRadarrMovieMonitored(config: AppConfig, movieId: number, monitored: boolean): Promise<void> {
+  await fetchJson(`${config.radarr.baseUrl}/api/v3/movie/editor`, {
+    method: 'PUT',
+    headers: {
+      'X-Api-Key': config.radarr.apiKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ movieIds: [movieId], monitored })
+  });
+}
+
 async function getSonarrSeriesById(config: AppConfig, seriesId: number): Promise<SonarrSeriesRecord | null> {
   if (!config.sonarr.baseUrl || !config.sonarr.apiKey || !seriesId) {
     return null;
@@ -2604,8 +2686,10 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
           tmdbId: details.id,
           year: Number(String(details.release_date || '').slice(0, 4)) || 0,
           minimumAvailability: 'released',
+          // Radarr only reads the top-level flag; addOptions has no `monitored`.
+          monitored: true,
           addOptions: {
-            monitored: config.radarr.monitor !== 'none',
+            monitor: config.radarr.monitor === 'movieAndCollection' ? 'movieAndCollection' : 'movieOnly',
             searchForMovie: false
           }
         })
@@ -2631,6 +2715,12 @@ export async function requestMovie(config: AppConfig, tmdbId: number, user: stri
   // If movie is already downloaded, we're done.
   if (movie.hasFile) {
     return;
+  }
+
+  // A movie that was already in Radarr may be unmonitored; without this Radarr
+  // would never grab it if the search below finds nothing yet.
+  if (!movie.monitored) {
+    await setRadarrMovieMonitored(config, movie.id, true);
   }
 
   // If movie is not downloaded, trigger a search.
@@ -2683,19 +2773,24 @@ export async function requestSeries(
   }
   const sonarrRequestConfig = await resolveSonarrRequestConfig(config);
 
-  addProcessingItem({
-    source: 'sonarr',
-    title: String(details.name || details.original_name || 'Series'),
-    subtitle: typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : 'All seasons',
-    tmdbId,
-    posterUrl: typeof details.poster_path === 'string' && details.poster_path
-      ? `${TMDB_IMAGE}/w342${details.poster_path}`
-      : undefined,
-    mediaType: 'series',
-    user: user || 'Unknown',
-  });
+  // Adding a series runs Sonarr's post-add monitoring after its first scan,
+  // which happens after this request returns. Monitoring a season ourselves
+  // afterwards would race with it, so tell Sonarr up front: send every season
+  // with only the requested one monitored and `skip`, which keeps those flags.
+  let seasons: SonarrSeriesRecord['seasons'];
+  if (typeof seasonNumber === 'number') {
+    const lookup = await fetchJson<SonarrSeriesRecord[]>(
+      `${config.sonarr.baseUrl}/api/v3/series/lookup?term=${encodeURIComponent(`tvdb:${tvdbId}`)}`,
+      { headers: { 'X-Api-Key': config.sonarr.apiKey } }
+    );
+    const lookupSeasons = lookup[0]?.seasons || [];
+    if (!lookupSeasons.some((season) => season.seasonNumber === seasonNumber)) {
+      throw new Error(`Season ${seasonNumber} was not found in Sonarr.`);
+    }
+    seasons = lookupSeasons.map((season) => ({ seasonNumber: season.seasonNumber, monitored: season.seasonNumber === seasonNumber }));
+  }
 
-  const series = await fetchJson<SonarrSeriesRecord>(`${config.sonarr.baseUrl}/api/v3/series`, {
+  await fetchJson<SonarrSeriesRecord>(`${config.sonarr.baseUrl}/api/v3/series`, {
     method: 'POST',
     headers: {
       'X-Api-Key': config.sonarr.apiKey,
@@ -2708,55 +2803,32 @@ export async function requestSeries(
       languageProfileId: sonarrRequestConfig.languageProfileId,
       rootFolderPath: sonarrRequestConfig.rootFolderPath,
       seasonFolder: true,
-      monitored: config.sonarr.monitor !== 'none',
-      addOptions: {
-        monitor: typeof seasonNumber === 'number' ? 'none' : config.sonarr.monitor,
-        searchForMissingEpisodes: typeof seasonNumber !== 'number',
-        searchForCutoffUnmetEpisodes: typeof seasonNumber !== 'number'
-      }
+      ...(seasons
+        ? {
+            monitored: true,
+            seasons,
+            // Sonarr searches the monitored (requested) season itself once the
+            // series is added and its episodes exist.
+            addOptions: { monitor: 'skip', searchForMissingEpisodes: true, searchForCutoffUnmetEpisodes: false }
+          }
+        : {
+            monitored: config.sonarr.monitor !== 'none',
+            addOptions: { monitor: config.sonarr.monitor, searchForMissingEpisodes: true, searchForCutoffUnmetEpisodes: true }
+          })
     })
   });
 
-  if (typeof seasonNumber !== 'number') {
-    return
-  }
-
-  if (!series?.id) {
-    throw new Error('Sonarr did not return the added series.')
-  }
-
-  const seasons = (series.seasons || []).map((season) =>
-    season.seasonNumber === seasonNumber
-      ? { ...season, monitored: true }
-      : { ...season, monitored: false }
-  )
-  if (!seasons.some((season) => season.seasonNumber === seasonNumber)) {
-    throw new Error(`Season ${seasonNumber} was not found in Sonarr.`)
-  }
-
-  await fetchJson(`${config.sonarr.baseUrl}/api/v3/series/${encodeURIComponent(String(series.id))}`, {
-    method: 'PUT',
-    headers: {
-      'X-Api-Key': config.sonarr.apiKey,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ ...series, monitored: true, seasons })
-  })
-
-  await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
-    method: 'POST',
-    headers: {
-      'X-Api-Key': config.sonarr.apiKey,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      name: 'SeasonSearch',
-      seriesId: series.id,
-      seasonNumber,
-      qualityProfileId
-    })
-  })
-
+  addProcessingItem({
+    source: 'sonarr',
+    title: String(details.name || details.original_name || 'Series'),
+    subtitle: typeof seasonNumber === 'number' ? `Season ${seasonNumber}` : 'All seasons',
+    tmdbId,
+    posterUrl: typeof details.poster_path === 'string' && details.poster_path
+      ? `${TMDB_IMAGE}/w342${details.poster_path}`
+      : undefined,
+    mediaType: 'series',
+    user: user || 'Unknown',
+  });
 }
 
 export async function requestSeason(config: AppConfig, payload: SeasonRequestPayload, user: string | null): Promise<void> {
@@ -2830,6 +2902,18 @@ export async function requestEpisode(config: AppConfig, payload: EpisodeRequestP
     throw new Error('Episode id is required.');
   }
 
+  const episode = await fetchJson<{ seriesId?: number; title?: string; seasonNumber?: number; episodeNumber?: number; series?: { title?: string; tmdbId?: number } }>(
+    `${config.sonarr.baseUrl}/api/v3/episode/${encodeURIComponent(String(payload.episodeId))}`,
+    { headers: { 'X-Api-Key': config.sonarr.apiKey } }
+  ).catch(() => null);
+
+  // Monitor just this episode (and the series, which Sonarr also requires),
+  // not the rest of its season, so it is grabbed later if nothing is out yet.
+  await setSonarrEpisodesMonitored(config, [payload.episodeId], true);
+  if (episode?.seriesId) {
+    await ensureSonarrSeriesMonitored(config, episode.seriesId);
+  }
+
   await fetchJson(`${config.sonarr.baseUrl}/api/v3/command`, {
     method: 'POST',
     headers: {
@@ -2843,31 +2927,16 @@ export async function requestEpisode(config: AppConfig, payload: EpisodeRequestP
     })
   });
 
-  // Try to get episode details for the processing item
-  try {
-    const episode = await fetchJson<{ title?: string; seasonNumber?: number; episodeNumber?: number; series?: { title?: string; tmdbId?: number } }>(
-      `${config.sonarr.baseUrl}/api/v3/episode/${encodeURIComponent(String(payload.episodeId))}`,
-      { headers: { 'X-Api-Key': config.sonarr.apiKey } }
-    );
-    addProcessingItem({
-      source: 'sonarr',
-      title: episode?.series?.title || 'Series',
-      subtitle: episode?.seasonNumber != null && episode?.episodeNumber != null
-        ? `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} \u00b7 ${episode.title || ''}`
-        : episode?.title || 'Episode',
-      tmdbId: episode?.series?.tmdbId,
-      mediaType: 'tv',
-      user: user || 'Unknown',
-    });
-  } catch {
-    addProcessingItem({
-      source: 'sonarr',
-      title: 'Episode',
-      subtitle: `Episode #${payload.episodeId}`,
-      mediaType: 'tv',
-      user: user || 'Unknown',
-    });
-  }
+  addProcessingItem({
+    source: 'sonarr',
+    title: episode?.series?.title || 'Series',
+    subtitle: episode?.seasonNumber != null && episode?.episodeNumber != null
+      ? `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')} \u00b7 ${episode.title || ''}`
+      : episode?.title || `Episode #${payload.episodeId}`,
+    tmdbId: episode?.series?.tmdbId,
+    mediaType: 'tv',
+    user: user || 'Unknown',
+  });
 }
 
 export async function deleteSeasonFiles(config: AppConfig, payload: SeasonDeletePayload): Promise<void> {
@@ -2879,10 +2948,17 @@ export async function deleteSeasonFiles(config: AppConfig, payload: SeasonDelete
     throw new Error('Series id and season number are required.');
   }
 
-  const [episodes, files] = await Promise.all([
+  const [series, episodes, files] = await Promise.all([
+    getSonarrSeriesById(config, payload.seriesId),
     getSonarrEpisodesBySeriesId(config, payload.seriesId),
     getSonarrEpisodeFilesBySeriesId(config, payload.seriesId)
   ]);
+
+  // Unmonitor before deleting, or Sonarr sees the episodes as missing and
+  // downloads them again.
+  if (series?.id) {
+    await setSonarrSeasonMonitored(config, series, payload.seasonNumber, false);
+  }
   const fileIds = new Set(
     episodes
       .filter((episode) => episode.seasonNumber === payload.seasonNumber && episode.episodeFileId)
