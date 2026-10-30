@@ -11,6 +11,7 @@ import {
   type WishlistEntry,
   type WishlistTogglePayload,
   type EpisodeRequestPayload,
+  type SeriesEpisodeRequestPayload,
   type EpisodeWatchStateRequest,
   type DiskSpaceStatus,
   type HubPageResponse,
@@ -50,6 +51,7 @@ import {
   proxyJellyfinImage,
   removeDownload,
   requestEpisode,
+  requestSeriesEpisode,
   requestMovie,
   requestSeason,
   requestSeries,
@@ -503,6 +505,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     const config = await readConfig(session!.encryptionKey);
     const body = await readJson<EpisodeRequestPayload & { user:string | null }>(request);
     await requestEpisode(config, body, body.user);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/api/requests/series-episode' && method === 'POST') {
+    const config = await readConfig(session!.encryptionKey);
+    const body = await readJson<SeriesEpisodeRequestPayload & { user: string | null }>(request);
+    await requestSeriesEpisode(config, body, body.user);
     sendJson(response, 200, { ok: true });
     return;
   }

@@ -18,6 +18,7 @@ import type {
   EpisodeWatchStateRequest,
   EpisodeRequestPayload,
   SeasonDeletePayload,
+  SeriesEpisodeRequestPayload,
   SeasonRequestPayload,
   TitleDetailsRequest,
   TitleDetailsResponse,
@@ -154,6 +155,11 @@ export const api = {
     }),
   requestEpisode: (payload: EpisodeRequestPayload, user: string | null) =>
     request<{ ok: boolean }>('/api/requests/episode', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, user }),
+    }),
+  requestSeriesEpisode: (payload: SeriesEpisodeRequestPayload, user: string | null) =>
+    request<{ ok: boolean }>('/api/requests/series-episode', {
       method: 'POST',
       body: JSON.stringify({ ...payload, user }),
     }),

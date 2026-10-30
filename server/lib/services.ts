@@ -17,6 +17,7 @@ import type {
   ProcessingItem,
   SeasonDeletePayload,
   SeasonRequestPayload,
+  SeriesEpisodeRequestPayload,
   SelectOption,
   ServiceOptionsResponse,
   TitleDetailsEpisode,
@@ -2442,7 +2443,11 @@ async function buildSeasonEpisodes(
         availability,
         downloadStatus,
         downloadProgress: isDownloading ? getEpisodeQueueProgress(queueEntry) : undefined,
-        canDownload: isManagedInSonarr && availability === 'missing',
+        // A series that is not in Sonarr yet is added by the request itself,
+        // unless Jellyfin already has the episode.
+        canDownload: Boolean(config.sonarr.baseUrl && config.sonarr.apiKey)
+          && (isManagedInSonarr || (Boolean(tmdbId) && !jellyfinKnowsAboutIt))
+          && availability === 'missing',
         canDelete: hasFile,
         watched: jellyfinEpisode?.watched,
         progress: jellyfinEpisode?.progress,
@@ -2971,6 +2976,67 @@ export async function requestEpisode(config: AppConfig, payload: EpisodeRequestP
     mediaType: 'tv',
     user: user || 'Unknown',
   });
+}
+
+export async function requestSeriesEpisode(config: AppConfig, payload: SeriesEpisodeRequestPayload, user: string | null): Promise<void> {
+  if (!config.sonarr.baseUrl || !config.sonarr.apiKey) {
+    throw new Error('Sonarr is not configured.');
+  }
+
+  const headers = { 'X-Api-Key': config.sonarr.apiKey };
+  const details = await tmdbFetch(
+    config,
+    `/tv/${payload.tmdbId}?append_to_response=external_ids&language=${encodeURIComponent(config.preferences.language)}`
+  );
+  if (!details) {
+    throw new Error('Failed to load the series from TMDb.');
+  }
+  const tvdbId = Number(asRecord(details?.external_ids).tvdb_id || 0);
+  if (!tvdbId) {
+    throw new Error('This series does not have a TVDB ID for Sonarr.');
+  }
+
+  // Nothing is monitored on add, so Sonarr searches for nothing but the
+  // episode that is monitored and searched below.
+  const sonarrRequestConfig = await resolveSonarrRequestConfig(config);
+  const lookup = await fetchJson<SonarrSeriesRecord[]>(
+    `${config.sonarr.baseUrl}/api/v3/series/lookup?term=${encodeURIComponent(`tvdb:${tvdbId}`)}`,
+    { headers }
+  );
+  const series = await fetchJson<SonarrSeriesRecord>(`${config.sonarr.baseUrl}/api/v3/series`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: details.name || details.original_name || 'Series',
+      tvdbId,
+      qualityProfileId: payload.qualityProfileId || sonarrRequestConfig.qualityProfileId,
+      languageProfileId: sonarrRequestConfig.languageProfileId,
+      rootFolderPath: sonarrRequestConfig.rootFolderPath,
+      seasonFolder: true,
+      monitored: true,
+      seasons: (lookup[0]?.seasons || []).map((season) => ({ seasonNumber: season.seasonNumber, monitored: false })),
+      addOptions: { monitor: 'none', searchForMissingEpisodes: false, searchForCutoffUnmetEpisodes: false }
+    })
+  });
+  if (!series.id) {
+    throw new Error('Sonarr did not return the added series.');
+  }
+
+  // Sonarr lists the episodes only after its first scan of the new series.
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const episodes = await fetchJson<Array<{ id?: number; seasonNumber?: number; episodeNumber?: number }>>(
+      `${config.sonarr.baseUrl}/api/v3/episode?seriesId=${series.id}`,
+      { headers }
+    );
+    const episode = episodes.find((entry) => entry.seasonNumber === payload.seasonNumber && entry.episodeNumber === payload.episodeNumber);
+    if (episode?.id) {
+      await requestEpisode(config, { episodeId: episode.id, qualityProfileId: payload.qualityProfileId }, user);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  throw new Error('Sonarr added the series but has not listed its episodes yet. Try the episode again in a moment.');
 }
 
 export async function deleteSeasonFiles(config: AppConfig, payload: SeasonDeletePayload): Promise<void> {

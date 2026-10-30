@@ -1857,6 +1857,55 @@ img {
   gap: 0.6rem;
 }
 
+/* Movie header: every control is a plain icon (heart, play, delete, request)
+   like the ones in a series' season bar, centred on one line and split by
+   dividers instead of sitting in boxes. */
+.title-details-summary-header > .title-season-action,
+.title-details-summary-header > .title-season-divider,
+.title-details-summary-header .title-summary-header-play,
+.title-details-summary-header .title-summary-header-delete,
+.title-details-summary-header > .secondary-button {
+  align-self: center;
+}
+
+.title-details-summary-header .title-summary-header-play,
+.title-details-summary-header .title-summary-header-delete,
+.title-details-summary-header > .secondary-button {
+  min-width: 1.9rem;
+  width: auto;
+  min-height: 1.9rem;
+  height: auto;
+  margin-top: 0;
+  padding: 0.18rem 0.4rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(237, 242, 255, 0.82);
+  font-weight: 600;
+  transition: color 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+
+.title-details-summary-header .title-summary-header-delete {
+  padding: 0.18rem;
+}
+
+.title-details-summary-header .title-summary-header-play:hover,
+.title-details-summary-header .title-summary-header-play:focus-visible,
+.title-details-summary-header .title-summary-header-delete:hover,
+.title-details-summary-header .title-summary-header-delete:focus-visible,
+.title-details-summary-header > .secondary-button:hover,
+.title-details-summary-header > .secondary-button:focus-visible {
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.title-details-summary-header .title-action-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
 .title-movie-request-processing,
 .title-movie-request-progress {
   display: inline-flex;

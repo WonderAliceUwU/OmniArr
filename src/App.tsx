@@ -2559,7 +2559,11 @@ function TitleDetailsModal(props: {
     event.preventDefault()
     event.stopPropagation()
 
-    if (!sonarrEpisodeId || availability === 'downloading' || episodeDownloadBusyId === episodeId) {
+    if (availability === 'downloading' || episodeDownloadBusyId === episodeId) {
+      return
+    }
+    // Without a Sonarr id the series is not in Sonarr yet; it is added by the request.
+    if (!sonarrEpisodeId && !props.card.tmdbId) {
       return
     }
 
@@ -2572,7 +2576,7 @@ function TitleDetailsModal(props: {
 
   function queueEpisodeDownload(
     episodeId: string,
-    sonarrEpisodeId: number,
+    sonarrEpisodeId: number | undefined,
     availability: TitleDetailsResponse['episodes'][number]['availability'],
     qualityProfileId?: number
   ) {
@@ -2585,7 +2589,17 @@ function TitleDetailsModal(props: {
       canDownload: false,
     }))
 
-    void api.requestEpisode({ episodeId: sonarrEpisodeId, qualityProfileId }, props.currentUser)
+    const episode = details?.episodes.find((entry) => entry.id === episodeId)
+    const request = sonarrEpisodeId
+      ? api.requestEpisode({ episodeId: sonarrEpisodeId, qualityProfileId }, props.currentUser)
+      : api.requestSeriesEpisode({
+        tmdbId: props.card.tmdbId!,
+        seasonNumber: episode?.seasonNumber ?? 0,
+        episodeNumber: episode?.episodeNumber ?? 0,
+        qualityProfileId,
+      }, props.currentUser)
+    void request
+      .then(() => refreshSeasonState(seasonValue || undefined))
       .catch(() => {
         setPendingEpisodeRequestIds((current) => current.filter((id) => id !== episodeId))
         updateEpisodeInCaches(episodeId, (episode) => ({
@@ -2701,13 +2715,16 @@ function TitleDetailsModal(props: {
                       ) : null}
                     </p>
                     <div className="title-details-summary-header">
-                      <WishlistHeart card={props.card} className="title-action-button title-action-button-delete title-wishlist-button" />
+                      {details?.mediaType !== 'series' ? (
+                        <WishlistHeart card={props.card} className="title-season-action title-wishlist-button" divider="after" />
+                      ) : null}
                       {canPlay && details?.mediaType !== 'series' ? (
                         <ActionButton className="title-summary-header-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
                           <PlayGlyph />
                           <span>Play</span>
                         </ActionButton>
                       ) : null}
+                      {canDeleteMovieAction ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
                       {canDeleteMovieAction ? (
                         <ActionButton
                           aria-label="Delete movie files"
@@ -2819,8 +2836,9 @@ function TitleDetailsModal(props: {
                           <strong>{activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length}</strong>
                           <span>{(activeSeasonDetails?.episodes.length ?? activeSeasonMeta?.episodeCount ?? details.episodes.length) === 1 ? 'episode' : 'episodes'}</span>
                         </div>
-                          {shouldShowDownloadSeasonAction || canDeleteSeasonAction ? (
+                          <>
                             <div className="title-season-actions">
+                              <WishlistHeart card={props.card} className="title-season-action title-wishlist-button" divider="before" />
                               {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
                               {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? (
                                 activeSeasonDownloadStatus === 'downloading' ? (
@@ -2886,7 +2904,7 @@ function TitleDetailsModal(props: {
                                   </>
                                 ) : null}
                               </div>
-                            ) : null}
+                            </>
                         <div className="title-season-strip-spacer" />
                         {canPlay ? (
                           <ActionButton
@@ -3171,14 +3189,17 @@ function HeartGlyph({ filled, className = 'sidebar-glyph-icon' }: { filled?: boo
   )
 }
 
-function WishlistHeart({ card, className }: { card: MediaCard; className: string }) {
+function WishlistHeart({ card, className, divider }: { card: MediaCard; className: string; divider?: 'before' | 'after' }) {
   const wishlist = useContext(WishlistContext)
   if (!wishlist || !canWishlist(card)) {
     return null
   }
 
   const wishlisted = wishlist.isWishlisted(card)
+  const separator = <div className="title-season-divider title-season-action-divider" aria-hidden="true" />
   return (
+    <>
+    {divider === 'before' ? separator : null}
     <button
       aria-label={wishlisted ? `Remove ${card.title} from wishlist` : `Add ${card.title} to wishlist`}
       aria-pressed={wishlisted}
@@ -3192,6 +3213,8 @@ function WishlistHeart({ card, className }: { card: MediaCard; className: string
     >
       <HeartGlyph className="title-action-icon" filled={wishlisted} />
     </button>
+    {divider === 'after' ? separator : null}
+    </>
   )
 }
 

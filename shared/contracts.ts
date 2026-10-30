@@ -304,6 +304,15 @@ export interface EpisodeRequestPayload {
   qualityProfileId?: number;
 }
 
+// An episode of a series that is not in Sonarr yet: it is added with nothing
+// monitored but this episode.
+export interface SeriesEpisodeRequestPayload {
+  tmdbId: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  qualityProfileId?: number;
+}
+
 export interface SeasonDeletePayload {
   seriesId: number;
   seasonNumber: number;
