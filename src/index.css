@@ -5940,3 +5940,13 @@ img {
     font-size: 1rem;
   }
 }
+
+.download-card.is-openable {
+  cursor: pointer;
+}
+
+.download-card.is-openable:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 4px;
+  border-radius: 1rem;
+}

@@ -751,8 +751,23 @@ export async function getCalendar(config: AppConfig, start: Date, end: Date): Pr
     ? radarrResult.value.map((item) => mapRadarrCalendarEntry(item))
     : []
 
+  // Link each entry to its Jellyfin item, as search does, so the details can
+  // tell which episodes are already in the library.
+  const library = await getLibrarySnapshot(config).catch(() => null);
+  const libraryProviderIds = new Map<string, string>();
+  for (const libraryItem of library?.allItems ?? []) {
+    const libraryCard = jellyfinToCard(libraryItem, libraryItem.Name || 'Library');
+    if (libraryCard?.tmdbId && libraryCard.providerId && (libraryCard.mediaType === 'movie' || libraryCard.mediaType === 'series')) {
+      libraryProviderIds.set(`${libraryCard.mediaType}:${libraryCard.tmdbId}`, libraryCard.providerId);
+    }
+  }
+
   const allItems = [...sonarrItems, ...radarrItems]
-      .filter((item): item is CalendarEntry => Boolean(item));
+      .filter((item): item is CalendarEntry => Boolean(item))
+      .map((item) => {
+        const providerId = item.card.tmdbId ? libraryProviderIds.get(`${item.card.mediaType}:${item.card.tmdbId}`) : undefined;
+        return providerId ? { ...item, card: { ...item.card, providerId } } : item;
+      });
 
   const backdropCache = new Map<string, Promise<TmdbBackdropChoice>>();
   const cards = await applyHighResBackdropsToCards(config, allItems.map(i => i.card), shouldUseHighResBackdropForCard, backdropCache, 'en');
@@ -968,11 +983,30 @@ async function removeSonarrSeriesIfEmpty(
   }
 }
 
+async function withLibraryProviderId(config: AppConfig, card: MediaCard): Promise<MediaCard> {
+  if (!card.tmdbId || (card.mediaType !== 'movie' && card.mediaType !== 'series' && card.mediaType !== 'tv')) {
+    return card;
+  }
+
+  const library = await getLibrarySnapshot(config).catch(() => null);
+  const wantedType = card.mediaType === 'movie' ? 'movie' : 'series';
+  for (const libraryItem of library?.allItems ?? []) {
+    const libraryCard = jellyfinToCard(libraryItem, libraryItem.Name || 'Library');
+    if (libraryCard?.tmdbId === card.tmdbId && libraryCard.mediaType === wantedType) {
+      return { ...card, providerId: libraryCard.providerId };
+    }
+  }
+  return card;
+}
+
 export async function getTitleDetails(
   config: AppConfig,
   request: TitleDetailsRequest
 ): Promise<TitleDetailsResponse> {
-  const { card, seasonId } = request;
+  const { seasonId } = request;
+  // Cards that don't come from Jellyfin (downloads, upcoming) are linked to
+  // their library item by TMDb id.
+  const card = request.card.providerId ? request.card : await withLibraryProviderId(config, request.card);
   const item = card.providerId ? await getJellyfinItemDetails(config, card.providerId) : null;
   const seriesItem = await resolveSeriesItem(config, card, item);
   const primaryItem = seriesItem || item;

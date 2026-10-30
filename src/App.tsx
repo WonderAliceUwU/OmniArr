@@ -594,7 +594,7 @@ function App() {
               />
             ) : null}
             {route === 'calendar' && isRouteAvailable(route, connections) ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
-            {route === 'downloads' && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} processingItems={processingItems} /> : null}
+            {route === 'downloads' && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} processingItems={processingItems} /> : null}
             {route === 'search' ? (
               <SearchPage
                 loading={searchLoading}
@@ -1032,17 +1032,19 @@ function JellyfinOnboardingScreen(props: {
       </section>
       <section className="auth-visual">
         <div className="auth-wallpaper" />
-        <div className="glass-card">
-          <p className="eyebrow">Profiles</p>
-          <div className="profile-grid compact">
-            {props.users.map((user) => (
-              <div className="profile-card static" key={user.id}>
-                <ProfileAvatar user={user} />
-                <strong>{user.label}</strong>
-              </div>
-            ))}
+        {props.users.length ? (
+          <div className="glass-card">
+            <p className="eyebrow">Profiles</p>
+            <div className="profile-grid compact">
+              {props.users.map((user) => (
+                <div className="profile-card static" key={user.id}>
+                  <ProfileAvatar user={user} />
+                  <strong>{user.label}</strong>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
     </div>
   )
@@ -1123,6 +1125,11 @@ function ProfileSelectionScreen(props: {
           </button>
         ))}
       </div>}
+      {!selectedUser && !props.users.length ? (
+        <div className="jellyfin-unavailable">
+          <p>No Jellyfin users found. An administrator has to check the Jellyfin connection.</p>
+        </div>
+      ) : null}
       {!selectedUser ? <div className="profiles-actions">
         <button aria-label="Administration" className="profile-admin-button" onClick={props.onAdmin} title="Administration" type="button">
           <span className="profile-admin-icon">
@@ -3193,6 +3200,7 @@ function DownloadsPage(props: {
   onDelete: (id: string) => Promise<void>
   onDismissCompleted: (id: string) => void
   onDismissAllCompleted: () => void
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
 }) {
   const hasAny = props.processingItems.length > 0 || props.downloads.length > 0 || props.completedDownloads.length > 0
   const [selectionMode, setSelectionMode] = useState(false)
@@ -3264,7 +3272,7 @@ function DownloadsPage(props: {
           <div className="downloads-grid">
             {props.processingItems.map((item) => (
               <article className="download-row download-row-processing" key={item.id}>
-                  <div className="download-card">
+                  <div {...downloadCardProps(item, selectionMode, props.onOpenCard)}>
                   <div className="download-artwork">
                     {item.posterUrl || item.backdropUrl
                       ? (
@@ -3315,6 +3323,7 @@ function DownloadsPage(props: {
                 item={item}
                 key={item.id}
                 onDelete={props.onDelete}
+                onOpenCard={props.onOpenCard}
                 onToggleSelection={() => toggleSelection(item.id, 'download')}
                 selected={selectedDownloadIds.includes(item.id)}
                 selectionMode={selectionMode}
@@ -3355,7 +3364,7 @@ function DownloadsPage(props: {
                     ×
                   </button>
                 )}
-                <div className="download-card">
+                <div {...downloadCardProps(item, selectionMode, props.onOpenCard)}>
                   <div className="download-artwork">
                     {item.posterUrl || item.backdropUrl
                       ? (
@@ -3409,6 +3418,43 @@ function DownloadsPage(props: {
   )
 }
 
+type DownloadCardSource = Pick<DownloadItem, 'title' | 'subtitle' | 'posterUrl' | 'backdropUrl' | 'tmdbId' | 'mediaType'> & { id: string }
+
+// Opens the title behind a download; without a TMDb id there is nothing to open.
+function downloadCardProps(
+  item: DownloadCardSource,
+  selectionMode: boolean,
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
+) {
+  if (!item.tmdbId || !item.mediaType || selectionMode) {
+    return { className: 'download-card' }
+  }
+
+  const card: MediaCard = {
+    id: `download-${item.id}`,
+    tmdbId: item.tmdbId,
+    title: item.title,
+    subtitle: item.subtitle || '',
+    overview: '',
+    mediaType: item.mediaType === 'movie' ? 'movie' : 'series',
+    posterUrl: item.posterUrl || '',
+    backdropUrl: item.backdropUrl || item.posterUrl || '',
+  }
+
+  return {
+    className: 'download-card is-openable',
+    role: 'button',
+    tabIndex: 0,
+    onClick: (event: React.MouseEvent<HTMLElement>) => onOpenCard(card, captureOriginRect(event.currentTarget)),
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        onOpenCard(card, captureOriginRect(event.currentTarget))
+      }
+    },
+  }
+}
+
 function DownloadRow(props: {
   item: DownloadItem
   busy: boolean
@@ -3416,6 +3462,7 @@ function DownloadRow(props: {
   selectionMode: boolean
   selected: boolean
   onToggleSelection: () => void
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
 }) {
   const item = props.item
   const progressMeta = [item.size, item.speed, item.eta].filter(Boolean).join(' · ')
@@ -3442,7 +3489,7 @@ function DownloadRow(props: {
           {props.selected ? '✓' : null}
         </button>
       ) : null}
-      <div className="download-card">
+      <div {...downloadCardProps(item, props.selectionMode, props.onOpenCard)}>
         <div className="download-artwork">
           {artwork ? (
             <picture>
@@ -3911,9 +3958,11 @@ function AdministrationScreen(props: {
   return (
     <div className="administration-layout">
       <header className="administration-header">
-        <button aria-label="Back to profiles" className="administration-back-button" onClick={props.onExit} title="Back to profiles" type="button">
-          <ArrowLeftGlyph />
-        </button>
+        {isJellyfinUnavailable(props.connections) ? <span /> : (
+          <button aria-label="Back to profiles" className="administration-back-button" onClick={props.onExit} title="Back to profiles" type="button">
+            <ArrowLeftGlyph />
+          </button>
+        )}
         <div>
           <p className="eyebrow">Administration</p>
           <h1>Settings</h1>
@@ -4144,7 +4193,7 @@ function resolveEntryStage(config: AppConfig, options: ServiceOptionsResponse): 
     return 'onboarding'
   }
   if (!options.jellyfinUsers.length) {
-    return 'profiles'
+    return 'onboarding'
   }
   if (!config.jellyfin.userId.trim()) {
     return 'profiles'
