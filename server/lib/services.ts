@@ -4048,6 +4048,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
         }
       }
 
+      // Proxies answer with a whole HTML page; it says nothing the status does not.
+      if (/^\s*<(!doctype|html)/i.test(detail)) detail = '';
+
+      if ([502, 503, 504].includes(response.status)) {
+        throw new Error(`${response.status} ${response.statusText}: the service did not answer. Check that it is running and that the URL points to it.`);
+      }
+
       throw new Error(detail
         ? `${response.status} ${response.statusText}: ${detail}`
         : `${response.status} ${response.statusText}`);

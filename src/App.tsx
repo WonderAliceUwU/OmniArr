@@ -3,8 +3,10 @@ import {
   type FormEvent,
   type MouseEvent,
   type ReactNode,
+  createContext,
   startTransition,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -29,6 +31,7 @@ import {
   type TitleDetailsCastMember,
   type TitleDetailsEpisode,
   type TitleDetailsResponse,
+  type WishlistEntry,
 } from '../shared/contracts'
 
 type AuthState = 'loading' | 'setup' | 'login' | 'profiles' | 'admin' | 'app'
@@ -42,12 +45,13 @@ const EPISODE_SCROLL_DISTANCE_RATIO = 0.72
 const SEASON_DOMINANCE_SWITCH_RATIO = 0.12
 const SEASON_DOMINANCE_SWITCH_MIN_PX = 56
 
-type SidebarItem = { route: AppRoute; label: string; short: string; icon?: 'calendar' | 'search' | 'downloads' | 'home' | 'library'; iconClassName?: string }
+type SidebarItem = { route: AppRoute; label: string; short: string; icon?: 'calendar' | 'search' | 'downloads' | 'home' | 'library' | 'wishlist'; iconClassName?: string }
 
 const topSidebarItems: SidebarItem[] = [
   { route: 'search', label: 'Search', short: 'S', icon: 'search', iconClassName: 'sidebar-search-icon' },
   { route: 'calendar', label: 'Upcoming', short: 'C', icon: 'calendar' },
   { route: 'downloads', label: 'Downloads', short: 'D', icon: 'downloads' },
+  { route: 'wishlist', label: 'Wishlist', short: 'W', icon: 'wishlist' },
 ]
 
 const sidebarItems: SidebarItem[] = [
@@ -64,6 +68,27 @@ const networkSidebarItems: Array<{ route: AppRoute; label: string; icon: string;
   { route: 'viki', label: 'Viki', icon: '/networks/viki.png' },
   { route: 'disney', label: 'Disney+', icon: '/networks/disney.webp' },
 ]
+
+// Routes that render their own page instead of a hub fetched from the server.
+const NON_HUB_ROUTES = new Set<AppRoute>(['downloads', 'settings', 'search', 'calendar', 'wishlist'])
+
+function isHubRoute(route: AppRoute) {
+  return !NON_HUB_ROUTES.has(route)
+}
+
+// Lets every tile and the title modal show and change whether a title is on
+// the current profile's wishlist without passing it through each component.
+const WishlistContext = createContext<{ isWishlisted: (card: MediaCard) => boolean; toggle: (card: MediaCard) => void } | null>(null)
+
+// The same title can come from Jellyfin or TMDb, so it is matched by its TMDb
+// id when it has one; the server matches titles the same way.
+function getWishlistKey(card: MediaCard) {
+  return card.tmdbId ? `${card.mediaType === 'movie' ? 'movie' : 'tv'}:${card.tmdbId}` : card.id
+}
+
+function canWishlist(card: MediaCard) {
+  return card.mediaType === 'movie' || card.mediaType === 'tv' || card.mediaType === 'series'
+}
 
 function App() {
   const [authState, setAuthState] = useState<AuthState>('loading')
@@ -98,6 +123,7 @@ function App() {
   const [lastSearchQuery, setLastSearchQuery] = useState('')
   const [selectedCard, setSelectedCard] = useState<SelectedCardState | null>(null)
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
+  const [wishlist, setWishlist] = useState<WishlistEntry[]>([])
   const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
 
   async function transitionEntryStage(nextStage: EntryStage) {
@@ -123,13 +149,15 @@ function App() {
   }
 
   async function refreshBaseData() {
-    const [settings, serviceOptions, dashboard, storage] = await Promise.all([
+    const [settings, serviceOptions, dashboard, storage, savedWishlist] = await Promise.all([
       api.getSettings(),
       api.getOptions(),
       api.getDashboard(),
       api.getDiskSpace(),
+      api.getWishlist(),
     ])
 
+    setWishlist(savedWishlist.items)
     setConfig(settings)
     setOptions(serviceOptions)
     setDownloads(dashboard.downloads)
@@ -209,7 +237,7 @@ function App() {
       return
     }
 
-    if (route === 'settings' || route === 'calendar' || route === 'search') {
+    if (route === 'settings' || route === 'calendar' || route === 'search' || route === 'wishlist') {
       return
     }
 
@@ -253,7 +281,7 @@ function App() {
 
     const interval = window.setInterval(() => {
       void refreshBaseData()
-      if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
+      if (isHubRoute(route)) {
         void loadHub(route as HubPageResponse['page'], { silent: true })
       }
     }, 30000)
@@ -314,6 +342,13 @@ function App() {
         apiKey: config.jellyfin.apiKey,
       })
       setOptions((current) => ({ ...current, jellyfinUsers: response.jellyfinUsers }))
+      // Loading the users only tests the typed values; save them so the
+      // connection stays configured after this screen.
+      if (sessionRole === 'admin') {
+        const saved = await api.saveSettings(config)
+        setConfig(saved.config)
+        setConnections(saved.connections)
+      }
       await transitionEntryStage(response.jellyfinUsers.length ? 'profiles' : 'onboarding')
       setNotice(response.jellyfinUsers.length ? 'Jellyfin users loaded.' : 'No Jellyfin users found.')
     } catch (loadError) {
@@ -375,7 +410,7 @@ function App() {
       } else {
         await api.requestSeries(card.tmdbId, currentJellyfinUser, qualityProfileId, seasonNumber)
       }
-      if (route !== 'downloads' && route !== 'settings' && route !== 'search' && route !== 'calendar') {
+      if (isHubRoute(route)) {
         await loadHub(route as HubPageResponse['page'], { silent: true })
       }
       setNotice(`${card.title} sent to ${card.mediaType === 'movie' ? 'Radarr' : 'Sonarr'}.`)
@@ -439,6 +474,66 @@ function App() {
     } finally {
       setSearchLoading(false)
     }
+  }
+
+  async function handleToggleWishlist(card: MediaCard) {
+    const key = getWishlistKey(card)
+    const wishlisted = !wishlist.some((entry) => getWishlistKey(entry.card) === key)
+    const previous = wishlist
+    // The heart fills straight away; the server's answer then replaces the list.
+    setWishlist(wishlisted
+      ? [{ card, addedAt: new Date().toISOString() }, ...previous]
+      : previous.filter((entry) => getWishlistKey(entry.card) !== key))
+    try {
+      const response = await api.setWishlisted({ card, wishlisted })
+      setWishlist(response.items)
+    } catch (wishlistError) {
+      setWishlist(previous)
+      setError(wishlistError instanceof Error ? wishlistError.message : 'Failed to update the wishlist.')
+    }
+  }
+
+  async function handleImportBackup(file: File) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      let backup: unknown
+      try {
+        backup = JSON.parse(await file.text())
+      } catch {
+        throw new Error('This file is not an OmniArr backup.')
+      }
+      const response = await api.importBackup(backup)
+      setConfig(response.config)
+      setConnections(response.connections)
+      await refreshBaseData()
+      setNotice('Backup restored.')
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : 'Failed to restore the backup.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleExportBackup() {
+    setError('')
+    try {
+      const backup = await api.exportBackup()
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `omniarr-backup-${backup.exportedAt.slice(0, 10)}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : 'Failed to export the backup.')
+    }
+  }
+
+  const wishlistContext = {
+    isWishlisted: (card: MediaCard) => wishlist.some((entry) => getWishlistKey(entry.card) === getWishlistKey(card)),
+    toggle: (card: MediaCard) => void handleToggleWishlist(card),
   }
 
   function updateConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
@@ -514,8 +609,12 @@ function App() {
         busy={busy}
         config={config}
         connections={connections}
+        error={error}
+        notice={notice}
         onExit={() => setAuthState('profiles')}
         onCheck={saveSettings}
+        onExportBackup={handleExportBackup}
+        onImportBackup={handleImportBackup}
         onSave={handleSaveSettings}
         options={options}
         updateConfig={updateConfig}
@@ -564,9 +663,10 @@ function App() {
   const currentJellyfinUser = sessionRole === 'admin'
     ? 'Administration'
     : options.jellyfinUsers.find((option) => option.id === config.jellyfin.userId)?.label || 'Media cockpit'
-  const currentHub = route !== 'downloads' && route !== 'settings' && route !== 'calendar' && route !== 'search' ? hubPages[route as HubPageResponse['page']] : undefined
+  const currentHub = isHubRoute(route) ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
+    <WishlistContext.Provider value={wishlistContext}>
     <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
       <Sidebar
         busy={busy}
@@ -612,12 +712,20 @@ function App() {
                 config={config}
                 connections={connections}
                 onCheck={saveSettings}
+                onExportBackup={handleExportBackup}
+                onImportBackup={handleImportBackup}
                 onSave={handleSaveSettings}
                 options={options}
                 updateConfig={updateConfig}
               />
             ) : null}
-            {route !== 'downloads' && route !== 'settings' && route !== 'calendar' && route !== 'search' ? (
+            {route === 'wishlist' ? (
+              <WishlistPage
+                items={wishlist}
+                onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })}
+              />
+            ) : null}
+            {isHubRoute(route) ? (
               <HubPageView
                 busy={busy}
                 hub={currentHub}
@@ -647,6 +755,7 @@ function App() {
         />
       ) : null}
     </div>
+    </WishlistContext.Provider>
   )
 }
 
@@ -734,7 +843,7 @@ function Sidebar(props: {
               type="button"
             >
               <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
-                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.short}
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.icon === 'wishlist' ? <HeartGlyph /> : item.short}
               </span>
               <span>{item.label}</span>
             </button>
@@ -750,7 +859,7 @@ function Sidebar(props: {
               type="button"
             >
               <span className={item.iconClassName ? `sidebar-link-short ${item.iconClassName}` : 'sidebar-link-short'} aria-hidden="true">
-                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.short}
+                {item.icon === 'calendar' ? <CalendarGlyph /> : item.icon === 'search' ? <SearchGlyph /> : item.icon === 'downloads' ? <DownloadGlyph /> : item.icon === 'home' ? <HomeGlyph /> : item.icon === 'library' ? <LibraryGlyph /> : item.icon === 'wishlist' ? <HeartGlyph /> : item.short}
               </span>
               <span>{item.label}</span>
             </button>
@@ -1679,6 +1788,7 @@ function MediaTile(props: {
         {props.card.hoverLabel && !continueEpisodeMeta ? <div className="media-hover-label">{props.card.hoverLabel}</div> : null}
         {props.card.progress ? <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${props.card.progress}%` }} /></div> : null}
       </button>
+      {!props.isContinueWatching && (props.styleType === 'landscape' || props.styleType === 'poster') ? <WishlistHeart card={props.card} className="media-wishlist-button" /> : null}
     </article>
   )
 }
@@ -2591,6 +2701,7 @@ function TitleDetailsModal(props: {
                       ) : null}
                     </p>
                     <div className="title-details-summary-header">
+                      <WishlistHeart card={props.card} className="title-action-button title-action-button-delete title-wishlist-button" />
                       {canPlay && details?.mediaType !== 'series' ? (
                         <ActionButton className="title-summary-header-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
                           <PlayGlyph />
@@ -3049,6 +3160,74 @@ function PlayGlyph() {
     <svg aria-hidden="true" className="title-action-icon" viewBox="0 0 16 16">
       <path d="M5 3.2v9.6L12.6 8 5 3.2Z" fill="currentColor" />
     </svg>
+  )
+}
+
+function HeartGlyph({ filled, className = 'sidebar-glyph-icon' }: { filled?: boolean; className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} fill={filled ? 'currentColor' : 'none'} viewBox="0 0 24 24">
+      <path d="M12 20.3 4.6 13a4.8 4.8 0 0 1 6.8-6.8l.6.6.6-.6a4.8 4.8 0 0 1 6.8 6.8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
+function WishlistHeart({ card, className }: { card: MediaCard; className: string }) {
+  const wishlist = useContext(WishlistContext)
+  if (!wishlist || !canWishlist(card)) {
+    return null
+  }
+
+  const wishlisted = wishlist.isWishlisted(card)
+  return (
+    <button
+      aria-label={wishlisted ? `Remove ${card.title} from wishlist` : `Add ${card.title} to wishlist`}
+      aria-pressed={wishlisted}
+      className={wishlisted ? `${className} is-wishlisted` : className}
+      onClick={(event) => {
+        event.stopPropagation()
+        wishlist.toggle(card)
+      }}
+      title={wishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+      type="button"
+    >
+      <HeartGlyph className="title-action-icon" filled={wishlisted} />
+    </button>
+  )
+}
+
+function WishlistPage(props: {
+  items: WishlistEntry[]
+  onOpenCard: (card: MediaCard, originRect?: ModalOriginRect | null) => void
+}) {
+  return (
+    <div className="search-page wishlist-page">
+      <section className="search-header">
+        <h2><HeartGlyph /> <span>Wishlist</span></h2>
+      </section>
+
+      {props.items.length ? (
+        <section className="search-results-section">
+          <div className="search-results-grid">
+            {props.items.map((entry) => (
+              <MediaTile
+                busy={false}
+                key={getWishlistKey(entry.card)}
+                card={entry.card}
+                isContinueWatching={false}
+                onOpenCard={props.onOpenCard}
+                onRequest={async () => {}}
+                styleType="landscape"
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <EmptyState
+          copy="Tap the heart on any movie or series to save it here."
+          title="Your wishlist is empty"
+        />
+      )}
+    </div>
   )
 }
 
@@ -3948,7 +4127,11 @@ function GlobeGlyph() {
 function AdministrationScreen(props: {
   config: AppConfig
   connections: ConnectionStatus[]
+  error: string
+  notice: string
   onExit: () => void
+  onExportBackup: () => Promise<void>
+  onImportBackup: (file: File) => Promise<void>
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
@@ -3968,11 +4151,15 @@ function AdministrationScreen(props: {
           <h1>Settings</h1>
         </div>
       </header>
+      {props.notice ? <p className="notice">{props.notice}</p> : null}
+      {props.error ? <p className="error-banner">{props.error}</p> : null}
       <SettingsView
         busy={props.busy}
         config={props.config}
         connections={props.connections}
         onCheck={props.onCheck}
+        onExportBackup={props.onExportBackup}
+        onImportBackup={props.onImportBackup}
         onSave={props.onSave}
         options={props.options}
         formId="administration-settings"
@@ -3989,10 +4176,13 @@ function SettingsView(props: {
   options: ServiceOptionsResponse
   onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>
   onCheck: () => Promise<void>
+  onExportBackup: () => Promise<void>
+  onImportBackup: (file: File) => Promise<void>
   busy: boolean
   formId?: string
 }) {
   const check = { busy: props.busy, onCheck: props.onCheck }
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   return (
     <form className="settings-page" id={props.formId} onSubmit={(event) => void props.onSave(event)}>
@@ -4076,6 +4266,35 @@ function SettingsView(props: {
           API key
           <input className="input" onChange={(event) => props.updateConfig('tvdb', { apiKey: event.target.value })} placeholder="Optional if already provided via TVDB_API_KEY" value={props.config.tvdb.apiKey} />
         </label>
+      </SettingsCard>
+
+      <SettingsCard title="Backup">
+        <p className="settings-backup-copy">
+          Saves every service connection and each profile's wishlist to a file. It holds your API keys, so keep it somewhere safe.
+          Restoring replaces the current settings and wishlists; the master password stays as it is.
+        </p>
+        <div className="settings-backup-actions">
+          <button className="secondary-button" disabled={props.busy} onClick={() => void props.onExportBackup()} type="button">
+            <DownloadGlyph />
+            <span>Export</span>
+          </button>
+          <button className="secondary-button" disabled={props.busy} onClick={() => importInputRef.current?.click()} type="button">
+            <span>Import</span>
+          </button>
+          <input
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              if (file && window.confirm('Restore this backup? The current settings and wishlists will be replaced.')) {
+                void props.onImportBackup(file)
+              }
+            }}
+            ref={importInputRef}
+            type="file"
+          />
+        </div>
       </SettingsCard>
 
     </form>

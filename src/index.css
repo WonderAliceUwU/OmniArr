@@ -5950,3 +5950,76 @@ img {
   outline-offset: 4px;
   border-radius: 1rem;
 }
+
+/* Wishlist */
+.media-wishlist-button {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(6, 8, 12, 0.55);
+  color: #f3f6ff;
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 180ms ease, transform 180ms ease, color 180ms ease;
+}
+
+.media-wishlist-button .title-action-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.media-tile:hover .media-wishlist-button,
+.media-tile:focus-within .media-wishlist-button,
+.media-wishlist-button.is-wishlisted {
+  opacity: 1;
+}
+
+.media-wishlist-button:hover,
+.media-wishlist-button:focus-visible {
+  transform: scale(1.08);
+}
+
+.media-wishlist-button.is-wishlisted,
+.title-wishlist-button.is-wishlisted {
+  color: #ff5c7a;
+}
+
+/* Touch screens have no hover, so the heart is always visible there. */
+@media (hover: none) {
+  .media-wishlist-button {
+    opacity: 1;
+  }
+}
+
+.settings-backup-copy {
+  margin: 0;
+  color: #98a8c4;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.settings-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.settings-backup-actions .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.administration-layout > .notice,
+.administration-layout > .error-banner {
+  max-width: 76rem;
+  margin: 0 auto 1rem;
+}

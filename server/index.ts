@@ -6,6 +6,10 @@ import {
   defaultConfig,
   type AppConfig,
   type AuthPayload,
+  type BackupFile,
+  type MediaCard,
+  type WishlistEntry,
+  type WishlistTogglePayload,
   type EpisodeRequestPayload,
   type EpisodeWatchStateRequest,
   type DiskSpaceStatus,
@@ -17,7 +21,18 @@ import {
   type TitleDetailsRequest
 } from '../shared/contracts.js';
 import { decryptJson, deriveEncryptionKey, encryptJson, randomToken, verifyPassword, createPasswordRecord } from './lib/security.js';
-import { loadState, migrateConfig, readAdmin, readEncryptedConfig, saveAdminAndConfig, updateEncryptedConfig } from './lib/store.js';
+import {
+  loadState,
+  migrateConfig,
+  readAdmin,
+  readAllWishlists,
+  readEncryptedConfig,
+  readWishlist,
+  restoreBackup,
+  saveAdminAndConfig,
+  updateEncryptedConfig,
+  updateWishlist
+} from './lib/store.js';
 import {
   getCalendar,
   getConnectionStatuses,
@@ -249,6 +264,72 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
 
   if (url.pathname === '/api/settings' && method === 'PUT' && session?.role !== 'admin') {
     sendJson(response, 403, { error: 'Administrator access is required.' });
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/admin/') && session?.role !== 'admin') {
+    sendJson(response, 403, { error: 'Administrator access is required.' });
+    return;
+  }
+
+  if (url.pathname === '/api/admin/backup' && method === 'GET') {
+    const backup: BackupFile = {
+      app: 'omniarr',
+      format: 1,
+      exportedAt: new Date().toISOString(),
+      config: await readConfig(),
+      wishlists: await readAllWishlists()
+    };
+    const fileName = `omniarr-backup-${backup.exportedAt.slice(0, 10)}.json`;
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Cache-Control': 'no-store'
+    });
+    response.end(JSON.stringify(backup, null, 2));
+    return;
+  }
+
+  if (url.pathname === '/api/admin/backup' && method === 'POST') {
+    let body: Partial<BackupFile>;
+    let config: AppConfig;
+    try {
+      body = await readJson<Partial<BackupFile>>(request);
+      if (body.app !== 'omniarr' || body.format !== 1 || !body.config || typeof body.config !== 'object') {
+        throw new Error('invalid');
+      }
+      config = mergeStoredConfig(body.config);
+    } catch {
+      sendJson(response, 400, { error: 'This file is not an OmniArr backup.' });
+      return;
+    }
+    config = { ...config, jellyfin: { ...config.jellyfin, userId: '' } };
+    await restoreBackup(
+      encryptJson(config, await getConfigEncryptionKey()),
+      sanitizeWishlists(body.wishlists)
+    );
+    sendJson(response, 200, { config, connections: await getConnectionStatuses(config) });
+    return;
+  }
+
+  if (url.pathname === '/api/wishlist' && method === 'GET') {
+    sendJson(response, 200, { items: await readWishlist(getWishlistOwner(session!)) });
+    return;
+  }
+
+  if (url.pathname === '/api/wishlist' && method === 'POST') {
+    const body = await readJson<WishlistTogglePayload>(request);
+    const card = sanitizeWishlistCard(body.card);
+    if (!card) {
+      sendJson(response, 400, { error: 'A title is required.' });
+      return;
+    }
+    const key = getWishlistKey(card);
+    const items = await updateWishlist(getWishlistOwner(session!), (entries) => {
+      const remaining = entries.filter((entry) => getWishlistKey(entry.card) !== key);
+      return body.wishlisted ? [{ card, addedAt: new Date().toISOString() }, ...remaining] : remaining;
+    });
+    sendJson(response, 200, { items });
     return;
   }
 
@@ -580,9 +661,17 @@ async function readConfig(legacyEncryptionKey?: Buffer): Promise<AppConfig> {
     throw new Error('The configuration must be unlocked by an administrator.');
   }
 
-  const stored = decryptJson<Partial<AppConfig>>(encrypted, encryptionKey);
+  const config = mergeStoredConfig(decryptJson<Partial<AppConfig>>(encrypted, encryptionKey));
+  // The Jellyfin user always comes from the profile the session signed in
+  // with; admin sessions have none, so a userId saved by older versions is ignored.
+  const userId = legacyEncryptionKey ? sessionUsers.get(legacyEncryptionKey) : undefined;
+  return { ...config, jellyfin: { ...config.jellyfin, userId: userId || '' } };
+}
 
-  const config = sanitizeConfig({
+// Fills in whatever a stored config (or an imported backup) leaves out with
+// the defaults, so configs saved by older versions keep loading.
+function mergeStoredConfig(stored: Partial<AppConfig>): AppConfig {
+  return sanitizeConfig({
     preferences: {
       ...defaultConfig.preferences,
       ...(stored.preferences || {})
@@ -608,10 +697,66 @@ async function readConfig(legacyEncryptionKey?: Buffer): Promise<AppConfig> {
       ...(stored.tvdb || {})
     }
   });
-  // The Jellyfin user always comes from the profile the session signed in
-  // with; admin sessions have none, so a userId saved by older versions is ignored.
-  const userId = legacyEncryptionKey ? sessionUsers.get(legacyEncryptionKey) : undefined;
-  return { ...config, jellyfin: { ...config.jellyfin, userId: userId || '' } };
+}
+
+// Profiles keep their own wishlist; the administrator has no Jellyfin profile
+// and shares a single one.
+function getWishlistOwner(session: SessionRecord): string {
+  return session.role === 'user' && session.userId ? session.userId : 'admin';
+}
+
+// The same title can reach the client as a Jellyfin card or a TMDb card, so
+// titles are matched by their TMDb id when they have one.
+function getWishlistKey(card: MediaCard): string {
+  return card.tmdbId ? `${card.mediaType === 'movie' ? 'movie' : 'tv'}:${card.tmdbId}` : card.id;
+}
+
+const WISHLIST_MEDIA_TYPES = new Set<MediaCard['mediaType']>(['movie', 'tv', 'series']);
+
+// Only what the wishlist page needs to draw a tile and open the title is kept;
+// progress and labels belong to the moment the card was saved.
+function sanitizeWishlistCard(input: unknown): MediaCard | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+  const card = input as Partial<MediaCard>;
+  const text = (value: unknown) => (typeof value === 'string' ? value : '');
+  const id = text(card.id);
+  if (!id || !card.mediaType || !WISHLIST_MEDIA_TYPES.has(card.mediaType)) {
+    return null;
+  }
+  return {
+    id,
+    tmdbId: Number(card.tmdbId) || undefined,
+    providerId: text(card.providerId) || undefined,
+    title: text(card.title),
+    subtitle: text(card.subtitle),
+    overview: text(card.overview),
+    mediaType: card.mediaType,
+    posterUrl: text(card.posterUrl),
+    backdropUrl: text(card.backdropUrl),
+    logoUrl: text(card.logoUrl) || undefined,
+    backdropLanguageFallback: card.backdropLanguageFallback ? true : undefined,
+    releaseDate: text(card.releaseDate) || undefined,
+    firstAirDate: text(card.firstAirDate) || undefined
+  };
+}
+
+function sanitizeWishlists(input: unknown): Record<string, WishlistEntry[]> {
+  const wishlists: Record<string, WishlistEntry[]> = {};
+  if (!input || typeof input !== 'object') {
+    return wishlists;
+  }
+  for (const [owner, entries] of Object.entries(input)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    wishlists[owner] = entries.flatMap((entry: Partial<WishlistEntry>) => {
+      const card = sanitizeWishlistCard(entry?.card);
+      return card ? [{ card, addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : new Date().toISOString() }] : [];
+    });
+  }
+  return wishlists;
 }
 
 async function getConfigEncryptionKey(): Promise<Buffer> {

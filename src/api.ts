@@ -2,6 +2,7 @@ import type {
   AppConfig,
   AuthPayload,
   AuthResponse,
+  BackupFile,
   CalendarResponse,
   ConnectionStatus,
   DashboardResponse,
@@ -19,7 +20,9 @@ import type {
   SeasonDeletePayload,
   SeasonRequestPayload,
   TitleDetailsRequest,
-  TitleDetailsResponse
+  TitleDetailsResponse,
+  WishlistResponse,
+  WishlistTogglePayload
 } from '../shared/contracts'
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -91,6 +94,18 @@ export const api = {
     request<{ jellyfinUsers: ServiceOptionsResponse['jellyfinUsers'] }>('/api/settings/jellyfin-users', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  getWishlist: () => request<WishlistResponse>('/api/wishlist'),
+  setWishlisted: (payload: WishlistTogglePayload) =>
+    request<WishlistResponse>('/api/wishlist', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  exportBackup: () => request<BackupFile>('/api/admin/backup'),
+  importBackup: (backup: unknown) =>
+    request<{ config: AppConfig; connections: ConnectionStatus[] }>('/api/admin/backup', {
+      method: 'POST',
+      body: JSON.stringify(backup),
     }),
   getDashboard: () => request<DashboardResponse>('/api/dashboard'),
   getDiskSpace: () => request<DiskSpaceStatus | null>('/api/storage'),

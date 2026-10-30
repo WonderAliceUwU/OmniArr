@@ -12,6 +12,7 @@ export type AppRoute =
   | 'library'
   | 'calendar'
   | 'downloads'
+  | 'wishlist'
   | 'settings';
 
 export interface ServiceConfig {
@@ -345,6 +346,29 @@ export interface AuthResponse {
   ok: boolean;
   needsSetup: boolean;
   message?: string;
+}
+
+export interface WishlistEntry {
+  card: MediaCard;
+  addedAt: string;
+}
+
+export interface WishlistResponse {
+  items: WishlistEntry[];
+}
+
+export interface WishlistTogglePayload {
+  card: MediaCard;
+  wishlisted: boolean;
+}
+
+/** What the administration exports: the service settings and every profile's wishlist. */
+export interface BackupFile {
+  app: 'omniarr';
+  format: 1;
+  exportedAt: string;
+  config: AppConfig;
+  wishlists: Record<string, WishlistEntry[]>;
 }
 
 export interface ApiErrorPayload {
