@@ -1,6 +1,6 @@
 services:
   omniarr:
-    image: wonderalice/omniarr:1.2.2
+    image: wonderalice/omniarr:1.2.3
     # Para construir desde código fuente en su lugar, descomenta estas líneas:
     # build:
     #   context: .
