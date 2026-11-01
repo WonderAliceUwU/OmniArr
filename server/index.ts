@@ -817,14 +817,17 @@ async function serveApp(pathname: string, response: ServerResponse): Promise<voi
   try {
     const content = await readFile(filePath);
     response.writeHead(200, {
-      'Content-Type': contentType(filePath)
+      'Content-Type': contentType(filePath),
+      // Hashed bundles never change; the entry page must always be revalidated so a new release reaches every browser.
+      'Cache-Control': relativePath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache'
     });
     response.end(content);
   } catch {
     try {
       const indexHtml = await readFile(resolve(process.cwd(), 'dist', 'index.html'));
       response.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8'
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache'
       });
       response.end(indexHtml);
     } catch {

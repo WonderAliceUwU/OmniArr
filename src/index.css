@@ -6041,10 +6041,11 @@ img {
   color: #ff5c7a;
 }
 
-/* Touch screens have no hover, so the heart is always visible there. */
-@media (hover: none) {
+/* Phones and touch screens have no hover, and a heart on every poster is noise;
+   the wishlist stays reachable from the title details. */
+@media (hover: none), (max-width: 980px) {
   .media-wishlist-button {
-    opacity: 1;
+    display: none;
   }
 }
 

@@ -2108,6 +2108,26 @@ function TitleDetailsModal(props: {
   const backgroundImage = details?.backdropUrl || props.card.backdropUrl || props.card.posterUrl
   const logoUrl = details?.logoUrl || props.card.logoUrl
   const displayTitle = details?.title || props.card.title
+  // Titles opened from Continue Watching arrive as a Jellyfin episode card, which
+  // cannot be wishlisted; the series the details resolved to can.
+  const wishlistCard: MediaCard = props.card.mediaType === 'episode' && details?.mediaType === 'series'
+    ? {
+        ...props.card,
+        id: details.providerId ? `jellyfin-${details.providerId}` : details.id,
+        tmdbId: details.tmdbId ?? props.card.tmdbId,
+        providerId: details.providerId ?? props.card.providerId,
+        title: details.title,
+        subtitle: '',
+        overview: details.overview,
+        mediaType: 'series',
+        posterUrl: details.posterUrl,
+        backdropUrl: details.backdropUrl,
+        logoUrl: details.logoUrl ?? props.card.logoUrl,
+        progress: undefined,
+        secondaryValue: undefined,
+        hoverLabel: undefined
+      }
+    : props.card
   const displaySubtitle = details?.subtitle || props.card.subtitle
   const displayOverview = details?.overview || props.card.overview || 'No details available yet.'
   const displayYear = props.card.releaseDate?.slice(0, 4)
@@ -2716,7 +2736,7 @@ function TitleDetailsModal(props: {
                     </p>
                     <div className="title-details-summary-header">
                       {details?.mediaType !== 'series' ? (
-                        <WishlistHeart card={props.card} className="title-season-action title-wishlist-button" divider="after" />
+                        <WishlistHeart card={wishlistCard} className="title-season-action title-wishlist-button" divider="after" />
                       ) : null}
                       {canPlay && details?.mediaType !== 'series' ? (
                         <ActionButton className="title-summary-header-play" onClick={() => setPlayerTarget({ id: playId!, title: playLabel })} variant="play">
@@ -2838,7 +2858,7 @@ function TitleDetailsModal(props: {
                         </div>
                           <>
                             <div className="title-season-actions">
-                              <WishlistHeart card={props.card} className="title-season-action title-wishlist-button" divider="before" />
+                              <WishlistHeart card={wishlistCard} className="title-season-action title-wishlist-button" divider="before" />
                               {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? <div className="title-season-divider title-season-action-divider" aria-hidden="true" /> : null}
                               {shouldShowDownloadSeasonAction || activeSeasonMeta?.isDownloading ? (
                                 activeSeasonDownloadStatus === 'downloading' ? (
