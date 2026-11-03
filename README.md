@@ -43,7 +43,7 @@ Create a directory for OmniArr and add this `docker-compose.yml`:
 ```yaml
 services:
   omniarr:
-    image: wonderalice/omniarr:1.2.3
+    image: wonderalice/omniarr:1.2.4
     container_name: omniarr
     restart: unless-stopped
     ports:
@@ -90,11 +90,11 @@ the mount loses that state when the container is replaced.
 The current release is available as:
 
 ```text
-wonderalice/omniarr:1.2.3
+wonderalice/omniarr:1.2.4
 wonderalice/omniarr:latest
 ```
 
-Pin `1.2.3` in production for repeatable updates. Use `latest` only when you want
+Pin `1.2.4` in production for repeatable updates. Use `latest` only when you want
 Compose to follow the newest published image.
 
 ## Build locally
