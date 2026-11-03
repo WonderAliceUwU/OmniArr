@@ -1786,7 +1786,7 @@ function MediaTile(props: {
           </div>
         ) : null}
         {props.card.hoverLabel && !continueEpisodeMeta ? <div className="media-hover-label">{props.card.hoverLabel}</div> : null}
-        {props.card.progress ? <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${props.card.progress}%` }} /></div> : null}
+        {props.isContinueWatching && props.card.progress ? <div className="tile-progress"><div className="tile-progress-fill" style={{ width: `${props.card.progress}%` }} /></div> : null}
       </button>
       {!props.isContinueWatching && (props.styleType === 'landscape' || props.styleType === 'poster') ? <WishlistHeart card={props.card} className="media-wishlist-button" /> : null}
     </article>
