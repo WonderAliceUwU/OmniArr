@@ -4153,7 +4153,10 @@ function jellyfinToCard(
   const backdropItemId = item.ParentBackdropItemId || item.Id;
   const backdropTag = item.ParentBackdropImageTags?.[0] || item.BackdropImageTags?.[0] || posterTag;
   const progress = Math.round(item.UserData?.PlayedPercentage || 0);
-  const tmdbId = Number(item.ProviderIds?.Tmdb) || (item.SeriesId ? tmdbIdByItemId?.get(item.SeriesId) : undefined);
+  // An episode's own TMDb id is not its series' id, and artwork is looked up per series.
+  const tmdbId = item.Type === 'Episode'
+    ? (item.SeriesId ? tmdbIdByItemId?.get(item.SeriesId) : undefined)
+    : Number(item.ProviderIds?.Tmdb) || (item.SeriesId ? tmdbIdByItemId?.get(item.SeriesId) : undefined);
   const episodeCode = formatEpisodeCode(item.ParentIndexNumber, item.IndexNumber);
 
   return {
