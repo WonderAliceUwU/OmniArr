@@ -55,7 +55,7 @@ const topSidebarItems: SidebarItem[] = [
 ]
 
 const sidebarItems: SidebarItem[] = [
-  { route: 'home', label: 'Inicio', short: 'H', icon: 'home' },
+  { route: 'home', label: 'Home', short: 'H', icon: 'home' },
   { route: 'dorama', label: 'K-Drama', short: '아' },
   { route: 'anime', label: 'Anime', short: 'あ' },
   { route: 'library', label: 'Library', short: 'L', icon: 'library' },
