@@ -124,7 +124,6 @@ function App() {
   const savedConfigJson = useRef(JSON.stringify(defaultConfig))
   const configRef = useRef(config)
   configRef.current = config
-  const settingsDirty = JSON.stringify(config) !== savedConfigJson.current
   const [options, setOptions] = useState<ServiceOptionsResponse>({
     jellyfinUsers: [],
     sonarrRootFolders: [],
@@ -649,7 +648,7 @@ function App() {
       <AdministrationScreen
         busy={busy}
         config={config}
-        dirty={settingsDirty}
+        savedConfig={JSON.parse(savedConfigJson.current) as AppConfig}
         connections={connections}
         error={error}
         notice={notice}
@@ -753,7 +752,7 @@ function App() {
               <SettingsView
                 busy={busy}
                 config={config}
-                dirty={settingsDirty}
+                savedConfig={JSON.parse(savedConfigJson.current) as AppConfig}
                 connections={connections}
                 onCheck={saveSettings}
                 onExportBackup={handleExportBackup}
@@ -4214,7 +4213,7 @@ function GlobeGlyph() {
 
 function AdministrationScreen(props: {
   config: AppConfig
-  dirty: boolean
+  savedConfig: AppConfig
   connections: ConnectionStatus[]
   error: string
   notice: string
@@ -4245,7 +4244,7 @@ function AdministrationScreen(props: {
       <SettingsView
         busy={props.busy}
         config={props.config}
-        dirty={props.dirty}
+        savedConfig={props.savedConfig}
         connections={props.connections}
         onCheck={props.onCheck}
         onExportBackup={props.onExportBackup}
@@ -4261,7 +4260,7 @@ function AdministrationScreen(props: {
 
 function SettingsView(props: {
   config: AppConfig
-  dirty: boolean
+  savedConfig: AppConfig
   connections: ConnectionStatus[]
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
@@ -4272,12 +4271,14 @@ function SettingsView(props: {
   busy: boolean
   formId?: string
 }) {
-  const check = { busy: props.busy, onCheck: props.onCheck, dirty: props.dirty }
+  const check = { busy: props.busy, onCheck: props.onCheck }
+  // Each card lights up only for the fields it owns.
+  const changed = (pick: (config: AppConfig) => unknown) => JSON.stringify(pick(props.config)) !== JSON.stringify(pick(props.savedConfig))
   const importInputRef = useRef<HTMLInputElement | null>(null)
 
   return (
     <form className="settings-page" id={props.formId} onSubmit={(event) => void props.onSave(event)}>
-      <SettingsCard title="Connections" {...check}>
+      <SettingsCard title="Connections" {...check} dirty={changed((c) => [c.preferences.language, c.preferences.region])}>
         <div className="settings-connections">
           {SERVICE_KEYS.map((key) => getServiceStatus(props.connections, key) ?? notCheckedYet(key)).map((connection) => (
             <div className="settings-connection" key={connection.key} title={connection.message}>
@@ -4317,7 +4318,7 @@ function SettingsView(props: {
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Profiles" {...check}>
+      <SettingsCard side title="Profiles" {...check} dirty={changed((c) => c.preferences.hiddenSections)}>
         <ProfilesAccess
           config={props.config}
           updateConfig={props.updateConfig}
@@ -4325,7 +4326,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard status={getServiceStatus(props.connections, 'jellyfin') ?? notCheckedYet('jellyfin')} title="Jellyfin" {...check}>
+      <SettingsCard status={getServiceStatus(props.connections, 'jellyfin') ?? notCheckedYet('jellyfin')} title="Jellyfin" {...check} dirty={changed((c) => [c.jellyfin.baseUrl, c.jellyfin.apiKey])}>
         <ServiceFields
           apiKey={props.config.jellyfin.apiKey}
           baseUrl={props.config.jellyfin.baseUrl}
@@ -4334,7 +4335,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard status={getServiceStatus(props.connections, 'sonarr') ?? notCheckedYet('sonarr')} title="Sonarr" {...check}>
+      <SettingsCard status={getServiceStatus(props.connections, 'sonarr') ?? notCheckedYet('sonarr')} title="Sonarr" {...check} dirty={changed((c) => [c.sonarr, c.preferences.sonarrDownloadQualityProfileIds])}>
         <ServiceFields
           apiKey={props.config.sonarr.apiKey}
           baseUrl={props.config.sonarr.baseUrl}
@@ -4351,7 +4352,7 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard status={getServiceStatus(props.connections, 'radarr') ?? notCheckedYet('radarr')} title="Radarr" {...check}>
+      <SettingsCard status={getServiceStatus(props.connections, 'radarr') ?? notCheckedYet('radarr')} title="Radarr" {...check} dirty={changed((c) => [c.radarr, c.preferences.radarrDownloadQualityProfileIds])}>
         <ServiceFields
           apiKey={props.config.radarr.apiKey}
           baseUrl={props.config.radarr.baseUrl}
@@ -4368,14 +4369,14 @@ function SettingsView(props: {
         />
       </SettingsCard>
 
-      <SettingsCard status={getServiceStatus(props.connections, 'tmdb') ?? notCheckedYet('tmdb')} title="TMDb" {...check}>
+      <SettingsCard status={getServiceStatus(props.connections, 'tmdb') ?? notCheckedYet('tmdb')} title="TMDb" {...check} dirty={changed((c) => c.tmdb)}>
         <label>
           API key or Read Access Token
           <input className="input" onChange={(event) => props.updateConfig('tmdb', { bearerToken: event.target.value })} placeholder="API key or API Read Access Token" value={props.config.tmdb.bearerToken} />
         </label>
       </SettingsCard>
 
-      <SettingsCard status={getServiceStatus(props.connections, 'tvdb') ?? notCheckedYet('tvdb')} title="TVDB" {...check}>
+      <SettingsCard status={getServiceStatus(props.connections, 'tvdb') ?? notCheckedYet('tvdb')} title="TVDB" {...check} dirty={changed((c) => c.tvdb)}>
         <label>
           API key
           <input className="input" onChange={(event) => props.updateConfig('tvdb', { apiKey: event.target.value })} placeholder="Optional if already provided via TVDB_API_KEY" value={props.config.tvdb.apiKey} />
@@ -4423,9 +4424,9 @@ function notCheckedYet(key: ConnectionStatus['key']): ConnectionStatus {
   return { key, label: SERVICE_LABELS[key], ok: false, message: 'Not configured', configured: false, optional: key !== 'jellyfin' }
 }
 
-function SettingsCard({ title, status, busy, dirty, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; dirty?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
+function SettingsCard({ title, status, busy, dirty, side, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; dirty?: boolean; side?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
   return (
-    <section className="settings-card">
+    <section className={side ? 'settings-card is-side' : 'settings-card'}>
       <div className="settings-card-header">
         <h2>{title}</h2>
         {onCheck ? (
@@ -4518,8 +4519,29 @@ function ProfilesAccess(props: {
   const [access, setAccess] = useState<ProfileLibraryAccess[]>([])
   const [accessError, setAccessError] = useState('')
   const [openUserId, setOpenUserId] = useState('')
+  const [query, setQuery] = useState('')
+  const [moreBelow, setMoreBelow] = useState(false)
+  const listRef = useRef<HTMLUListElement | null>(null)
   const preferences = props.config.preferences
   const openUser = props.users.find((user) => user.id === openUserId)
+  const visibleUsers = props.users.filter((user) => user.label.toLowerCase().includes(query.trim().toLowerCase()))
+
+  function updateMoreBelow() {
+    const list = listRef.current
+    setMoreBelow(Boolean(list) && list!.scrollHeight - list!.scrollTop - list!.clientHeight > 4)
+  }
+
+  // The list is as tall as the card next to it, so tell whether more rows hide below.
+  useEffect(() => {
+    const list = listRef.current
+    updateMoreBelow()
+    if (!list) {
+      return
+    }
+    const observer = new ResizeObserver(updateMoreBelow)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [visibleUsers.length, props.users.length])
 
   useEffect(() => {
     if (!props.users.length) {
@@ -4574,23 +4596,44 @@ function ProfilesAccess(props: {
         Pick a profile to choose which sections it sees and review the libraries Jellyfin gives it.
         Upcoming also leaves out releases stored in libraries a profile cannot open.
       </p>
-      <ul className="profiles-access-list">
-        {props.users.map((user) => {
-          const hidden = preferences.hiddenSections[user.id] ?? []
-          return (
-            <li key={user.id}>
-              <button className="profiles-access-summary" onClick={() => setOpenUserId(user.id)} type="button">
-                <ProfileAvatar user={user} />
-                <span className="profiles-access-name">{user.label}</span>
-                <span className="profiles-access-meta">
-                  {hidden.length ? `${hidden.length} hidden` : 'All sections'}
-                </span>
-                <span aria-hidden="true" className="profiles-access-chevron" />
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+      <input
+        aria-label="Search profiles"
+        className="input profiles-access-search"
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search profiles"
+        type="search"
+        value={query}
+      />
+      <div className="profiles-access-scroll">
+        <ul className="profiles-access-list" onScroll={updateMoreBelow} ref={listRef}>
+          {visibleUsers.map((user) => {
+            const hidden = preferences.hiddenSections[user.id] ?? []
+            return (
+              <li key={user.id}>
+                <button className="profiles-access-summary" onClick={() => setOpenUserId(user.id)} type="button">
+                  <ProfileAvatar user={user} />
+                  <span className="profiles-access-name">{user.label}</span>
+                  <span className="profiles-access-meta">
+                    {hidden.length ? `${hidden.length} hidden` : 'All sections'}
+                  </span>
+                  <span aria-hidden="true" className="profiles-access-chevron" />
+                </button>
+              </li>
+            )
+          })}
+          {!visibleUsers.length ? <li className="profiles-access-note">No profiles match “{query.trim()}”.</li> : null}
+        </ul>
+        {moreBelow ? (
+          <button
+            aria-label="Show more profiles"
+            className="profiles-access-more"
+            onClick={() => listRef.current?.scrollBy({ top: listRef.current.clientHeight * 0.8, behavior: 'smooth' })}
+            type="button"
+          >
+            <span aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
       {openUser ? createPortal(
         <div className="profile-dialog-backdrop" onClick={() => setOpenUserId('')}>
           <div

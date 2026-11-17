@@ -6115,13 +6115,95 @@ img {
   font-size: 0.86rem;
 }
 
+.profiles-access-scroll {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .profiles-access-list {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: 0.6rem;
+  min-height: 0;
+  max-height: 26rem;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
+  scrollbar-width: thin;
+}
+
+/* A hint that more profiles wait below: a fade with an arrow that scrolls down. */
+.profiles-access-more {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  place-items: end center;
+  height: 3.6rem;
+  padding: 0 0 0.35rem;
+  border: 0;
+  background: linear-gradient(to top, rgba(10, 12, 18, 0.96) 15%, rgba(10, 12, 18, 0));
+  color: #dfe7f7;
+  cursor: pointer;
+}
+
+.profiles-access-more span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  animation: profiles-access-nudge 1.6s ease-in-out infinite;
+}
+
+@keyframes profiles-access-nudge {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 0.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profiles-access-more span {
+    animation: none;
+  }
+}
+
+/* Next to the Connections card, the card takes that card's height instead of
+   stretching the row, and its list scrolls inside it. */
+.settings-card.is-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-card.is-side .settings-fields {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.settings-card.is-side .profiles-access {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (min-width: 981px) {
+  .settings-card.is-side {
+    min-height: 20rem;
+    contain: size;
+  }
+
+  .settings-card.is-side .profiles-access-list {
+    max-height: none;
+  }
 }
 
 .profiles-access-summary {
