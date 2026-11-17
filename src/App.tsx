@@ -22,9 +22,11 @@ import {
   type CompletedDownloadItem,
   type DownloadItem,
   type DiskSpaceStatus,
+  type HideableSection,
   type HubPageResponse,
   type MediaCard,
   type ProcessingItem,
+  type ProfileLibraryAccess,
   type SearchResponse,
   type SelectOption,
   type ServiceOptionsResponse,
@@ -33,6 +35,7 @@ import {
   type TitleDetailsResponse,
   type WishlistEntry,
 } from '../shared/contracts'
+import { HIDEABLE_SECTIONS } from '../shared/contracts'
 
 type AuthState = 'loading' | 'setup' | 'login' | 'profiles' | 'admin' | 'app'
 type EntryStage = 'onboarding' | 'profiles' | 'dashboard'
@@ -125,8 +128,10 @@ function App() {
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
   const [wishlist, setWishlist] = useState<WishlistEntry[]>([])
   const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
-  // The administrator can keep some profiles away from Downloads.
-  const canViewDownloads = sessionRole !== 'user' || !config.preferences.downloadsRestrictedUserIds.includes(config.jellyfin.userId)
+  // The administrator can switch sections off for each profile; admin sessions see them all.
+  const hiddenSections: string[] = sessionRole === 'user' ? (config.preferences.hiddenSections[config.jellyfin.userId] ?? []) : []
+  const isSectionHidden = (sectionRoute: AppRoute) => hiddenSections.includes(sectionRoute)
+  const routeHidden = isSectionHidden(route)
 
   async function transitionEntryStage(nextStage: EntryStage) {
     if (nextStage === entryStage) {
@@ -239,15 +244,16 @@ function App() {
       return
     }
 
+    if (routeHidden) {
+      setRoute('home')
+      return
+    }
+
     if (route === 'settings' || route === 'calendar' || route === 'search' || route === 'wishlist') {
       return
     }
 
     if (route === 'downloads') {
-      if (!canViewDownloads) {
-        setRoute('home')
-        return
-      }
       void refreshDownloads()
       const interval = window.setInterval(() => {
         void refreshDownloads()
@@ -276,7 +282,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authState, canViewDownloads, entryStage, route])
+  }, [authState, entryStage, route, routeHidden])
 
 
 
@@ -672,11 +678,11 @@ function App() {
   const currentHub = isHubRoute(route) ? hubPages[route as HubPageResponse['page']] : undefined
 
   return (
-    <WishlistContext.Provider value={wishlistContext}>
+    <WishlistContext.Provider value={isSectionHidden('wishlist') ? null : wishlistContext}>
     <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
       <Sidebar
         busy={busy}
-        canViewDownloads={canViewDownloads}
+        isSectionHidden={isSectionHidden}
         connections={connections}
         currentUser={currentJellyfinUser}
         diskSpace={diskSpace}
@@ -700,8 +706,8 @@ function App() {
                 title="Nothing to track yet"
               />
             ) : null}
-            {route === 'calendar' && isRouteAvailable(route, connections) ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
-            {route === 'downloads' && canViewDownloads && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} processingItems={processingItems} /> : null}
+            {route === 'calendar' && !routeHidden && isRouteAvailable(route, connections) ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
+            {route === 'downloads' && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} processingItems={processingItems} /> : null}
             {route === 'search' ? (
               <SearchPage
                 loading={searchLoading}
@@ -782,7 +788,7 @@ function Sidebar(props: {
   connections: ConnectionStatus[]
   busy: boolean
   canManage: boolean
-  canViewDownloads: boolean
+  isSectionHidden: (route: AppRoute) => boolean
   onExitProfile: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -843,7 +849,7 @@ function Sidebar(props: {
           </button>
 
         <div className="sidebar-links">
-          {topSidebarItems.filter((item) => isRouteAvailable(item.route, props.connections) && (item.route !== 'downloads' || props.canViewDownloads)).map((item) => (
+          {topSidebarItems.filter((item) => isRouteAvailable(item.route, props.connections) && !props.isSectionHidden(item.route)).map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
@@ -859,7 +865,7 @@ function Sidebar(props: {
         </div>
 
         <div className="sidebar-links">
-          {sidebarItems.map((item) => (
+          {sidebarItems.filter((item) => !props.isSectionHidden(item.route)).map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
@@ -875,7 +881,7 @@ function Sidebar(props: {
         </div>
 
         <div className="sidebar-links">
-          {networkSidebarItems.map((item) => (
+          {networkSidebarItems.filter((item) => !props.isSectionHidden(item.route)).map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
@@ -4260,9 +4266,12 @@ function SettingsView(props: {
           Region
           <input className="input" maxLength={2} onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, region: event.target.value })} value={props.config.preferences.region} />
         </label>
-        <DownloadsAccess
-          onChange={(downloadsRestrictedUserIds) => props.updateConfig('preferences', { ...props.config.preferences, downloadsRestrictedUserIds })}
-          restrictedUserIds={props.config.preferences.downloadsRestrictedUserIds}
+      </SettingsCard>
+
+      <SettingsCard title="Profiles" wide {...check}>
+        <ProfilesAccess
+          config={props.config}
+          updateConfig={props.updateConfig}
           users={props.options.jellyfinUsers}
         />
       </SettingsCard>
@@ -4365,9 +4374,9 @@ function notCheckedYet(key: ConnectionStatus['key']): ConnectionStatus {
   return { key, label: SERVICE_LABELS[key], ok: false, message: 'Not configured', configured: false, optional: key !== 'jellyfin' }
 }
 
-function SettingsCard({ title, status, busy, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
+function SettingsCard({ title, status, busy, onCheck, wide, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; wide?: boolean; children: ReactNode }) {
   return (
-    <section className="settings-card">
+    <section className={wide ? 'settings-card is-wide' : 'settings-card'}>
       <div className="settings-card-header">
         <h2>{title}</h2>
         {onCheck ? (
@@ -4445,35 +4454,145 @@ function QualityProfileVisibility(props: {
   )
 }
 
-function DownloadsAccess(props: {
+function ProfilesAccess(props: {
   users: SelectOption[]
-  restrictedUserIds: string[]
-  onChange: (userIds: string[]) => void
+  config: AppConfig
+  updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
 }) {
+  const [access, setAccess] = useState<ProfileLibraryAccess[]>([])
+  const [accessError, setAccessError] = useState('')
+  const [openUserId, setOpenUserId] = useState('')
+  const preferences = props.config.preferences
+
+  useEffect(() => {
+    if (!props.users.length) {
+      return
+    }
+    let cancelled = false
+    api.getProfileAccess()
+      .then((response) => {
+        if (cancelled) return
+        setAccess(response.profiles)
+        setAccessError('')
+      })
+      .catch((loadError) => {
+        if (cancelled) return
+        setAccessError(loadError instanceof Error ? loadError.message : 'Could not read the Jellyfin libraries.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.users.length])
+
+  function setSectionVisible(userId: string, section: HideableSection, visible: boolean) {
+    const current = preferences.hiddenSections[userId] ?? []
+    const next = visible ? current.filter((id) => id !== section) : [...current.filter((id) => id !== section), section]
+    const hiddenSections = { ...preferences.hiddenSections }
+    if (next.length) {
+      hiddenSections[userId] = next
+    } else {
+      delete hiddenSections[userId]
+    }
+    props.updateConfig('preferences', { ...preferences, hiddenSections })
+  }
+
+  if (!props.users.length) {
+    return <p className="profiles-access-note">Connect Jellyfin first to load its profiles.</p>
+  }
+
   return (
-    <fieldset className="quality-profile-visibility">
-      <legend>Who can see Downloads</legend>
-      <p>Untick the profiles that should not open the Downloads page. The administrator always can.</p>
-      {props.users.length ? (
-        <div className="quality-profile-visibility-list">
-          {props.users.map((user) => {
-            const restricted = props.restrictedUserIds.includes(user.id)
-            return (
-              <label key={user.id}>
-                <input
-                  checked={!restricted}
-                  onChange={() => props.onChange(restricted
-                    ? props.restrictedUserIds.filter((id) => id !== user.id)
-                    : [...props.restrictedUserIds, user.id])}
-                  type="checkbox"
-                />
-                <span>{user.label}</span>
-              </label>
-            )
-          })}
-        </div>
-      ) : <p>Connect Jellyfin first to load its profiles.</p>}
-    </fieldset>
+    <div className="profiles-access">
+      <p className="profiles-access-note">
+        Pick a profile to choose which sections it sees. Libraries come from its Jellyfin permissions and are managed there.
+      </p>
+      <label className="profiles-access-option">
+        <span>
+          <strong>Hide upcoming releases from libraries a profile cannot open</strong>
+          <small>Sonarr and Radarr do not know Jellyfin permissions, so releases are matched to a library by title or by folder.</small>
+        </span>
+        <ToggleSwitch
+          checked={preferences.filterUpcomingByLibrary}
+          label="Hide upcoming releases from libraries a profile cannot open"
+          onChange={(filterUpcomingByLibrary) => props.updateConfig('preferences', { ...preferences, filterUpcomingByLibrary })}
+        />
+      </label>
+      <ul className="profiles-access-list">
+        {props.users.map((user) => {
+          const open = openUserId === user.id
+          const hidden = preferences.hiddenSections[user.id] ?? []
+          const profileAccess = access.find((entry) => entry.userId === user.id)
+          return (
+            <li className={open ? 'profiles-access-item is-open' : 'profiles-access-item'} key={user.id}>
+              <button
+                aria-expanded={open}
+                className="profiles-access-summary"
+                onClick={() => setOpenUserId(open ? '' : user.id)}
+                type="button"
+              >
+                <ProfileAvatar user={user} />
+                <span className="profiles-access-name">{user.label}</span>
+                <span className="profiles-access-meta">
+                  {hidden.length ? `${hidden.length} hidden` : 'All sections'}
+                </span>
+                <span aria-hidden="true" className="profiles-access-chevron" />
+              </button>
+              {open ? (
+                <div className="profiles-access-detail">
+                  <div>
+                    <h3>Sections</h3>
+                    <div className="profiles-access-sections">
+                      {HIDEABLE_SECTIONS.map((section) => (
+                        <label className="profiles-access-section" key={section.id}>
+                          <span>{section.label}</span>
+                          <ToggleSwitch
+                            checked={!hidden.includes(section.id)}
+                            label={`${section.label} for ${user.label}`}
+                            onChange={(visible) => setSectionVisible(user.id, section.id, visible)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h3>Libraries</h3>
+                    {profileAccess ? (
+                      <>
+                        {profileAccess.allLibraries ? <p className="profiles-access-note">Can open every library.</p> : null}
+                        <ul className="profiles-access-libraries">
+                          {profileAccess.libraries.map((library) => (
+                            <li className={library.access ? 'has-access' : 'no-access'} key={library.id}>
+                              <span aria-hidden="true">{library.access ? '✓' : '✕'}</span>
+                              <span>{library.name}</span>
+                              <span className="visually-hidden">{library.access ? 'has access' : 'no access'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="profiles-access-note">{accessError || 'Loading libraries…'}</p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function ToggleSwitch(props: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <span className="toggle-switch">
+      <input
+        aria-label={props.label}
+        checked={props.checked}
+        onChange={(event) => props.onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span aria-hidden="true" className="toggle-switch-track" />
+    </span>
   )
 }
 

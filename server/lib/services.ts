@@ -11,10 +11,12 @@ import type {
   EpisodeRequestPayload,
   EpisodeWatchStateRequest,
   HubPageResponse,
+  HideableSection,
   HubSection,
   MediaCard,
   MovieDeletePayload,
   ProcessingItem,
+  ProfileLibraryAccess,
   SeasonDeletePayload,
   SeasonRequestPayload,
   SeriesEpisodeRequestPayload,
@@ -26,6 +28,7 @@ import type {
   TitleDetailsSeason,
   TitleDetailsCastMember
 } from '../../shared/contracts.js';
+import { HIDEABLE_SECTIONS } from '../../shared/contracts.js';
 
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
 const TMDB_ARTWORK_TTL_MS = 6 * 60 * 60 * 1000;
@@ -373,6 +376,24 @@ let tvdbTokenCache: { token: string; expiresAt: number } | null = null;
 const tmdbArtworkCache = new Map<string, { expiresAt: number; value: Promise<TmdbArtwork> }>();
 const tvdbTranslationCache = new Map<string, { expiresAt: number; value: Promise<TvdbTranslationRecord | null> }>();
 
+const HIDEABLE_SECTION_IDS = new Set<string>(HIDEABLE_SECTIONS.map((section) => section.id));
+
+function sanitizeHiddenSections(input: unknown): Record<string, HideableSection[]> {
+  const hidden: Record<string, HideableSection[]> = {};
+  if (!input || typeof input !== 'object') {
+    return hidden;
+  }
+  for (const [userId, sections] of Object.entries(input)) {
+    const valid = Array.isArray(sections)
+      ? [...new Set(sections.map(String))].filter((section): section is HideableSection => HIDEABLE_SECTION_IDS.has(section))
+      : [];
+    if (userId && valid.length) {
+      hidden[userId] = valid;
+    }
+  }
+  return hidden;
+}
+
 export function sanitizeConfig(input: AppConfig): AppConfig {
   return {
     preferences: {
@@ -386,9 +407,8 @@ export function sanitizeConfig(input: AppConfig): AppConfig {
       radarrDownloadQualityProfileIds: Array.isArray(input.preferences.radarrDownloadQualityProfileIds)
         ? input.preferences.radarrDownloadQualityProfileIds.map(String)
         : [],
-      downloadsRestrictedUserIds: Array.isArray(input.preferences.downloadsRestrictedUserIds)
-        ? input.preferences.downloadsRestrictedUserIds.map(String)
-        : []
+      hiddenSections: sanitizeHiddenSections(input.preferences.hiddenSections),
+      filterUpcomingByLibrary: Boolean(input.preferences.filterUpcomingByLibrary)
     },
     jellyfin: {
       baseUrl: normalizeBaseUrl(input.jellyfin.baseUrl),
@@ -754,8 +774,8 @@ export async function getCalendar(config: AppConfig, start: Date, end: Date): Pr
   // tell which episodes are already in the library.
   const library = await getLibrarySnapshot(config).catch(() => null);
 
-  // A profile only sees upcoming releases that belong to the libraries it can open.
-  const hidden = await getHiddenLibraryScope(config, library?.allItems ?? []);
+  // With the setting on, a profile only sees upcoming releases from the libraries it can open.
+  const hidden = config.preferences.filterUpcomingByLibrary ? await getHiddenLibraryScope(config, library?.allItems ?? []) : null;
   const sonarrItems = sonarrResult.status === 'fulfilled'
     ? sonarrResult.value
         .filter((item) => !hidden?.hides('series', Number(item.series?.tmdbId) || undefined, item.series?.path))
@@ -867,6 +887,37 @@ async function getHiddenLibraryScope(config: AppConfig, visibleItems: JellyfinIt
     console.warn('Could not read the profile libraries; the calendar is not filtered.', error);
     return null;
   }
+}
+
+// What Jellyfin lets each profile open, for the administrator to review; the
+// permissions themselves are managed in Jellyfin.
+export async function getProfileLibraryAccess(config: AppConfig): Promise<ProfileLibraryAccess[]> {
+  if (!config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
+    return [];
+  }
+
+  const [users, folders] = await Promise.all([
+    jellyfinFetch<Array<{ Id?: string; Name?: string; Policy?: { EnableAllFolders?: boolean; EnabledFolders?: string[] } }>>(config, '/Users'),
+    jellyfinFetch<Array<{ Name?: string; ItemId?: string }>>(config, '/Library/VirtualFolders')
+  ]);
+  const libraries = folders.filter((folder) => folder.ItemId && folder.Name);
+
+  return users
+    .filter((user) => user.Id)
+    .map((user) => {
+      const allLibraries = user.Policy?.EnableAllFolders !== false;
+      const enabled = new Set((user.Policy?.EnabledFolders ?? []).map(normalizeLibraryId));
+      return {
+        userId: String(user.Id),
+        label: user.Name || 'User',
+        allLibraries,
+        libraries: libraries.map((folder) => ({
+          id: String(folder.ItemId),
+          name: String(folder.Name),
+          access: allLibraries || enabled.has(normalizeLibraryId(folder.ItemId))
+        }))
+      };
+    });
 }
 
 export async function searchTitles(

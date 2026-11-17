@@ -4,6 +4,7 @@ import { BlockList, isIP } from 'node:net';
 import { resolve } from 'node:path';
 import {
   defaultConfig,
+  HIDEABLE_SECTIONS,
   type AppConfig,
   type AuthPayload,
   type BackupFile,
@@ -14,6 +15,7 @@ import {
   type SeriesEpisodeRequestPayload,
   type EpisodeWatchStateRequest,
   type DiskSpaceStatus,
+  type HideableSection,
   type HubPageResponse,
   type JellyfinLoginPayload,
   type MovieDeletePayload,
@@ -58,6 +60,7 @@ import {
   setEpisodeWatchState,
   sanitizeConfig,
   getDownloadsResponse,
+  getProfileLibraryAccess,
   dismissCompletedDownload,
   dismissAllCompletedDownloads
 } from './lib/services.js';
@@ -274,6 +277,23 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     return;
   }
 
+  if (url.pathname === '/api/admin/profile-access' && method === 'GET') {
+    const config = await readConfig(session!.encryptionKey);
+    sendJson(response, 200, { profiles: await getProfileLibraryAccess(config) });
+    return;
+  }
+
+  // Sections the administrator switched off for this profile are closed on the
+  // server too, not only hidden from the menu.
+  const section = session?.role === 'user' && session.userId ? getSectionOfRoute(url.pathname) : null;
+  if (section) {
+    const config = await readConfig(session!.encryptionKey);
+    if ((config.preferences.hiddenSections[session!.userId!] ?? []).includes(section)) {
+      sendJson(response, 403, { error: 'This section is not available for your profile.' });
+      return;
+    }
+  }
+
   if (url.pathname === '/api/admin/backup' && method === 'GET') {
     const backup: BackupFile = {
       app: 'omniarr',
@@ -392,14 +412,6 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
       sendJson(response, 500, { error: err instanceof Error ? err.message : 'Internal server error' });
     }
     return;
-  }
-
-  if (url.pathname.startsWith('/api/downloads')) {
-    const config = await readConfig(session!.encryptionKey);
-    if (!canViewDownloads(session!, config)) {
-      sendJson(response, 403, { error: 'You do not have access to downloads.' });
-      return;
-    }
   }
 
   if (url.pathname === '/api/downloads' && method === 'GET') {
@@ -719,10 +731,14 @@ function mergeStoredConfig(stored: Partial<AppConfig>): AppConfig {
 
 // Profiles keep their own wishlist; the administrator has no Jellyfin profile
 // and shares a single one.
-// Profiles the administrator listed cannot open the Downloads page; the admin
-// session always can.
-function canViewDownloads(session: SessionRecord, config: AppConfig): boolean {
-  return session.role === 'admin' || !session.userId || !config.preferences.downloadsRestrictedUserIds.includes(session.userId);
+// The section of the app an API route serves, if the administrator can switch it off.
+function getSectionOfRoute(pathname: string): HideableSection | null {
+  const section = pathname.startsWith('/api/downloads') ? 'downloads'
+    : pathname.startsWith('/api/calendar') ? 'calendar'
+    : pathname.startsWith('/api/search') ? 'search'
+    : pathname.startsWith('/api/hubs/') ? decodeURIComponent(pathname.replace('/api/hubs/', ''))
+    : '';
+  return HIDEABLE_SECTIONS.find((candidate) => candidate.id === section)?.id ?? null;
 }
 
 function getWishlistOwner(session: SessionRecord): string {

@@ -15,6 +15,24 @@ export type AppRoute =
   | 'wishlist'
   | 'settings';
 
+// Sections of the app the administrator can switch off for a profile.
+export const HIDEABLE_SECTIONS = [
+  { id: 'search', label: 'Search' },
+  { id: 'calendar', label: 'Upcoming' },
+  { id: 'downloads', label: 'Downloads' },
+  { id: 'wishlist', label: 'Wishlist' },
+  { id: 'dorama', label: 'K-Drama' },
+  { id: 'anime', label: 'Anime' },
+  { id: 'library', label: 'Library' },
+  { id: 'netflix', label: 'Netflix' },
+  { id: 'primevideo', label: 'Prime Video' },
+  { id: 'hbo', label: 'HBO' },
+  { id: 'viki', label: 'Viki' },
+  { id: 'disney', label: 'Disney+' }
+] as const;
+
+export type HideableSection = (typeof HIDEABLE_SECTIONS)[number]['id'];
+
 export interface ServiceConfig {
   baseUrl: string;
 }
@@ -56,8 +74,18 @@ export interface AppPreferences {
   animationLevel: 'smooth' | 'reduced';
   sonarrDownloadQualityProfileIds: string[];
   radarrDownloadQualityProfileIds: string[];
-  /** Jellyfin profiles that cannot open the Downloads page; empty lets everyone in. */
-  downloadsRestrictedUserIds: string[];
+  /** Sections switched off for each Jellyfin profile, by user id; a profile that is not listed sees everything. */
+  hiddenSections: Record<string, HideableSection[]>;
+  /** Upcoming leaves out releases from Jellyfin libraries the signed-in profile cannot open. */
+  filterUpcomingByLibrary: boolean;
+}
+
+export interface ProfileLibraryAccess {
+  userId: string;
+  label: string;
+  /** Jellyfin lets this profile open every library, including ones added later. */
+  allLibraries: boolean;
+  libraries: Array<{ id: string; name: string; access: boolean }>;
 }
 
 export interface AppConfig {
@@ -394,7 +422,8 @@ export const defaultConfig: AppConfig = {
     animationLevel: 'smooth',
     sonarrDownloadQualityProfileIds: [],
     radarrDownloadQualityProfileIds: [],
-    downloadsRestrictedUserIds: []
+    hiddenSections: {},
+    filterUpcomingByLibrary: false
   },
   jellyfin: {
     baseUrl: '',

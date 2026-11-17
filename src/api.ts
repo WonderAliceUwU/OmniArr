@@ -12,6 +12,7 @@ import type {
   JellyfinLoginPayload,
   MediaCard,
   MovieDeletePayload,
+  ProfileLibraryAccess,
   SearchResponse,
   ServiceOptionsResponse,
   SessionResponse,
@@ -103,6 +104,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   exportBackup: () => request<BackupFile>('/api/admin/backup'),
+  getProfileAccess: () => request<{ profiles: ProfileLibraryAccess[] }>('/api/admin/profile-access'),
   importBackup: (backup: unknown) =>
     request<{ config: AppConfig; connections: ConnectionStatus[] }>('/api/admin/backup', {
       method: 'POST',
