@@ -193,7 +193,6 @@ interface SonarrCalendarRecord {
   series?: {
     title?: string;
     tmdbId?: number;
-    path?: string;
     images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
     year?: number;
     status?: string;
@@ -244,7 +243,6 @@ interface RadarrCalendarRecord {
   digitalRelease?: string;
   monitored?: boolean;
   hasFile?: boolean;
-  path?: string;
   images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
@@ -774,16 +772,19 @@ export async function getCalendar(config: AppConfig, start: Date, end: Date): Pr
   // tell which episodes are already in the library.
   const library = await getLibrarySnapshot(config).catch(() => null);
 
-  // With the setting on, a profile only sees upcoming releases from the libraries it can open.
-  const hidden = config.preferences.filterUpcomingByLibrary ? await getHiddenLibraryScope(config, library?.allItems ?? []) : null;
+  // With the setting on, a profile's calendar is the releases of the titles in the
+  // libraries it can open: Jellyfin answers per user with exactly those titles.
+  const ownTitles = config.preferences.filterUpcomingByLibrary && config.jellyfin.userId && library
+    ? new Set(library.allItems.map(getTmdbTitleKey).filter(Boolean))
+    : null;
   const sonarrItems = sonarrResult.status === 'fulfilled'
     ? sonarrResult.value
-        .filter((item) => !hidden?.hides('series', Number(item.series?.tmdbId) || undefined, item.series?.path))
+        .filter((item) => !ownTitles || ownTitles.has(`series:${Number(item.series?.tmdbId)}`))
         .map((item) => mapSonarrCalendarEntry(item))
     : []
   const radarrItems = radarrResult.status === 'fulfilled'
     ? radarrResult.value
-        .filter((item) => !hidden?.hides('movie', Number(item.tmdbId) || undefined, item.path))
+        .filter((item) => !ownTitles || ownTitles.has(`movie:${Number(item.tmdbId)}`))
         .map((item) => mapRadarrCalendarEntry(item))
     : []
   const libraryProviderIds = new Map<string, string>();
@@ -822,71 +823,13 @@ export async function getCalendar(config: AppConfig, start: Date, end: Date): Pr
   }
 }
 
-interface HiddenLibraryScope {
-  hides(kind: 'movie' | 'series', tmdbId: number | undefined, path: string | undefined): boolean;
-}
-
 function normalizeLibraryId(id: string | undefined): string {
   return String(id || '').replace(/-/g, '').toLowerCase();
 }
 
-function normalizeLibraryPath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-// What the signed-in Jellyfin profile cannot open: the libraries missing from
-// its views, the titles inside them and where they live on disk. Sonarr and
-// Radarr know nothing about those permissions, so releases are matched to a
-// hidden library by TMDb id (for titles already in Jellyfin) or by folder.
-// Admin sessions have no profile and see everything.
-async function getHiddenLibraryScope(config: AppConfig, visibleItems: JellyfinItem[]): Promise<HiddenLibraryScope | null> {
-  if (!config.jellyfin.userId || !config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
-    return null;
-  }
-
-  try {
-    const [folders, views] = await Promise.all([
-      jellyfinFetch<Array<{ ItemId?: string; Locations?: string[] }>>(config, '/Library/VirtualFolders'),
-      jellyfinFetch<JellyfinItem[]>(config, `/UserViews?userId=${encodeURIComponent(config.jellyfin.userId)}`)
-    ]);
-    const visibleLibraryIds = new Set(views.map((view) => normalizeLibraryId(view.Id)));
-    const hiddenFolders = folders.filter((folder) => folder.ItemId && !visibleLibraryIds.has(normalizeLibraryId(folder.ItemId)));
-    if (!hiddenFolders.length) {
-      return null;
-    }
-
-    const toKey = (item: JellyfinItem) => {
-      const tmdbId = Number(item.ProviderIds?.Tmdb);
-      return tmdbId ? `${item.Type === 'Movie' ? 'movie' : 'series'}:${tmdbId}` : '';
-    };
-    const hiddenItems = await Promise.all(hiddenFolders.map((folder) =>
-      jellyfinFetch<JellyfinItem[]>(
-        config,
-        `/Items?parentId=${encodeURIComponent(String(folder.ItemId))}&recursive=true&includeItemTypes=Movie,Series&fields=ProviderIds`
-      ).catch(() => [] as JellyfinItem[])
-    ));
-    // A title that also sits in a library the profile can open stays visible.
-    const visibleKeys = new Set(visibleItems.map(toKey).filter(Boolean));
-    const hiddenKeys = new Set(hiddenItems.flat().map(toKey).filter((key) => key && !visibleKeys.has(key)));
-    const hiddenLocations = hiddenFolders.flatMap((folder) => folder.Locations ?? []).map(normalizeLibraryPath).filter(Boolean);
-
-    return {
-      hides(kind, tmdbId, path) {
-        if (tmdbId && visibleKeys.has(`${kind}:${tmdbId}`)) {
-          return false;
-        }
-        if (tmdbId && hiddenKeys.has(`${kind}:${tmdbId}`)) {
-          return true;
-        }
-        const normalized = path ? normalizeLibraryPath(path) : '';
-        return Boolean(normalized) && hiddenLocations.some((location) => normalized === location || normalized.startsWith(`${location}/`));
-      }
-    };
-  } catch (error) {
-    // Better to show the calendar than to break it when Jellyfin cannot be asked.
-    console.warn('Could not read the profile libraries; the calendar is not filtered.', error);
-    return null;
-  }
+function getTmdbTitleKey(item: JellyfinItem): string {
+  const tmdbId = Number(item.ProviderIds?.Tmdb);
+  return tmdbId ? `${item.Type === 'Movie' ? 'movie' : 'series'}:${tmdbId}` : '';
 }
 
 // What Jellyfin lets each profile open, for the administrator to review; the

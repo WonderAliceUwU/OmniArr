@@ -4507,12 +4507,12 @@ function ProfilesAccess(props: {
       </p>
       <label className="profiles-access-option">
         <span>
-          <strong>Hide upcoming releases from libraries a profile cannot open</strong>
-          <small>Sonarr and Radarr do not know Jellyfin permissions, so releases are matched to a library by title or by folder.</small>
+          <strong>Separate Upcoming for each profile</strong>
+          <small>Each profile only sees upcoming releases for the titles in the libraries it can open. Releases not in Jellyfin yet are left out.</small>
         </span>
         <ToggleSwitch
           checked={preferences.filterUpcomingByLibrary}
-          label="Hide upcoming releases from libraries a profile cannot open"
+          label="Separate Upcoming for each profile"
           onChange={(filterUpcomingByLibrary) => props.updateConfig('preferences', { ...preferences, filterUpcomingByLibrary })}
         />
       </label>

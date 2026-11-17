@@ -76,7 +76,7 @@ export interface AppPreferences {
   radarrDownloadQualityProfileIds: string[];
   /** Sections switched off for each Jellyfin profile, by user id; a profile that is not listed sees everything. */
   hiddenSections: Record<string, HideableSection[]>;
-  /** Upcoming leaves out releases from Jellyfin libraries the signed-in profile cannot open. */
+  /** Upcoming only lists releases for titles in the Jellyfin libraries the signed-in profile can open. */
   filterUpcomingByLibrary: boolean;
 }
 
