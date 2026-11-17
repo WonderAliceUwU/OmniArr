@@ -3991,6 +3991,23 @@ img {
   opacity: 0.5;
 }
 
+/* Unsaved changes: the button turns amber and pulses until they are applied. */
+.settings-card-check.is-dirty {
+  background: #f6ad55;
+  animation: settings-check-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes settings-check-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 173, 85, 0.5); }
+  50% { box-shadow: 0 0 0 0.45rem rgba(246, 173, 85, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-card-check.is-dirty {
+    animation: none;
+  }
+}
+
 .settings-card label,
 .auth-form label {
   display: grid;

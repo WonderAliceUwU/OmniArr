@@ -120,6 +120,11 @@ function App() {
   const [notice, setNotice] = useState('')
   const [password, setPassword] = useState('')
   const [config, setConfig] = useState<AppConfig>(defaultConfig)
+  // What the server has, to tell when the settings on screen have unsaved changes.
+  const savedConfigJson = useRef(JSON.stringify(defaultConfig))
+  const configRef = useRef(config)
+  configRef.current = config
+  const settingsDirty = JSON.stringify(config) !== savedConfigJson.current
   const [options, setOptions] = useState<ServiceOptionsResponse>({
     jellyfinUsers: [],
     sonarrRootFolders: [],
@@ -171,6 +176,11 @@ function App() {
     setEntryTransitionState('idle')
   }
 
+  function applyServerConfig(next: AppConfig) {
+    savedConfigJson.current = JSON.stringify(next)
+    setConfig(next)
+  }
+
   async function refreshBaseData() {
     const [settings, serviceOptions, dashboard, storage, savedWishlist] = await Promise.all([
       api.getSettings(),
@@ -181,7 +191,10 @@ function App() {
     ])
 
     setWishlist(savedWishlist.items)
-    setConfig(settings)
+    // Edits that are not saved yet are not replaced by the periodic refresh.
+    if (JSON.stringify(configRef.current) === savedConfigJson.current) {
+      applyServerConfig(settings)
+    }
     setOptions(serviceOptions)
     setDownloads(dashboard.downloads)
     setProcessingItems(dashboard.processing || [])
@@ -374,7 +387,7 @@ function App() {
       // connection stays configured after this screen.
       if (sessionRole === 'admin') {
         const saved = await api.saveSettings(config)
-        setConfig(saved.config)
+        applyServerConfig(saved.config)
         setConnections(saved.connections)
       }
       await transitionEntryStage(response.jellyfinUsers.length ? 'profiles' : 'onboarding')
@@ -415,7 +428,7 @@ function App() {
     setNotice('')
     try {
       const response = await api.saveSettings(config)
-      setConfig(response.config)
+      applyServerConfig(response.config)
       setConnections(response.connections)
       await refreshBaseData()
       setNotice('Settings saved and services refreshed.')
@@ -533,7 +546,7 @@ function App() {
         throw new Error('This file is not an OmniArr backup.')
       }
       const response = await api.importBackup(backup)
-      setConfig(response.config)
+      applyServerConfig(response.config)
       setConnections(response.connections)
       await refreshBaseData()
       setNotice('Backup restored.')
@@ -636,6 +649,7 @@ function App() {
       <AdministrationScreen
         busy={busy}
         config={config}
+        dirty={settingsDirty}
         connections={connections}
         error={error}
         notice={notice}
@@ -739,6 +753,7 @@ function App() {
               <SettingsView
                 busy={busy}
                 config={config}
+                dirty={settingsDirty}
                 connections={connections}
                 onCheck={saveSettings}
                 onExportBackup={handleExportBackup}
@@ -4199,6 +4214,7 @@ function GlobeGlyph() {
 
 function AdministrationScreen(props: {
   config: AppConfig
+  dirty: boolean
   connections: ConnectionStatus[]
   error: string
   notice: string
@@ -4229,6 +4245,7 @@ function AdministrationScreen(props: {
       <SettingsView
         busy={props.busy}
         config={props.config}
+        dirty={props.dirty}
         connections={props.connections}
         onCheck={props.onCheck}
         onExportBackup={props.onExportBackup}
@@ -4244,6 +4261,7 @@ function AdministrationScreen(props: {
 
 function SettingsView(props: {
   config: AppConfig
+  dirty: boolean
   connections: ConnectionStatus[]
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void
   options: ServiceOptionsResponse
@@ -4254,7 +4272,7 @@ function SettingsView(props: {
   busy: boolean
   formId?: string
 }) {
-  const check = { busy: props.busy, onCheck: props.onCheck }
+  const check = { busy: props.busy, onCheck: props.onCheck, dirty: props.dirty }
   const importInputRef = useRef<HTMLInputElement | null>(null)
 
   return (
@@ -4405,13 +4423,20 @@ function notCheckedYet(key: ConnectionStatus['key']): ConnectionStatus {
   return { key, label: SERVICE_LABELS[key], ok: false, message: 'Not configured', configured: false, optional: key !== 'jellyfin' }
 }
 
-function SettingsCard({ title, status, busy, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
+function SettingsCard({ title, status, busy, dirty, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; dirty?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
   return (
     <section className="settings-card">
       <div className="settings-card-header">
         <h2>{title}</h2>
         {onCheck ? (
-          <button aria-label={`Save and check ${title}`} className="settings-card-check" disabled={busy} onClick={() => void onCheck()} title="Save and check" type="button">
+          <button
+            aria-label={dirty ? `Save changes and check ${title}` : `Save and check ${title}`}
+            className={dirty ? 'settings-card-check is-dirty' : 'settings-card-check'}
+            disabled={busy}
+            onClick={() => void onCheck()}
+            title={dirty ? 'You have unsaved changes: click to save and apply them' : 'Save and check'}
+            type="button"
+          >
             <CheckGlyph />
           </button>
         ) : null}
