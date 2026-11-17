@@ -394,6 +394,14 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse):
     return;
   }
 
+  if (url.pathname.startsWith('/api/downloads')) {
+    const config = await readConfig(session!.encryptionKey);
+    if (!canViewDownloads(session!, config)) {
+      sendJson(response, 403, { error: 'You do not have access to downloads.' });
+      return;
+    }
+  }
+
   if (url.pathname === '/api/downloads' && method === 'GET') {
     const config = await readConfig(session!.encryptionKey);
     sendJson(response, 200, await getDownloadsResponse(config));
@@ -711,6 +719,12 @@ function mergeStoredConfig(stored: Partial<AppConfig>): AppConfig {
 
 // Profiles keep their own wishlist; the administrator has no Jellyfin profile
 // and shares a single one.
+// Profiles the administrator listed cannot open the Downloads page; the admin
+// session always can.
+function canViewDownloads(session: SessionRecord, config: AppConfig): boolean {
+  return session.role === 'admin' || !session.userId || !config.preferences.downloadsRestrictedUserIds.includes(session.userId);
+}
+
 function getWishlistOwner(session: SessionRecord): string {
   return session.role === 'user' && session.userId ? session.userId : 'admin';
 }

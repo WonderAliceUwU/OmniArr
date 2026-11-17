@@ -56,6 +56,8 @@ export interface AppPreferences {
   animationLevel: 'smooth' | 'reduced';
   sonarrDownloadQualityProfileIds: string[];
   radarrDownloadQualityProfileIds: string[];
+  /** Jellyfin profiles that cannot open the Downloads page; empty lets everyone in. */
+  downloadsRestrictedUserIds: string[];
 }
 
 export interface AppConfig {
@@ -391,7 +393,8 @@ export const defaultConfig: AppConfig = {
     excludeLibraryItems: true,
     animationLevel: 'smooth',
     sonarrDownloadQualityProfileIds: [],
-    radarrDownloadQualityProfileIds: []
+    radarrDownloadQualityProfileIds: [],
+    downloadsRestrictedUserIds: []
   },
   jellyfin: {
     baseUrl: '',

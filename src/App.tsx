@@ -125,6 +125,8 @@ function App() {
   const [downloadDeleteId, setDownloadDeleteId] = useState('')
   const [wishlist, setWishlist] = useState<WishlistEntry[]>([])
   const [entryTransitionState, setEntryTransitionState] = useState<EntryTransitionState>('idle')
+  // The administrator can keep some profiles away from Downloads.
+  const canViewDownloads = sessionRole !== 'user' || !config.preferences.downloadsRestrictedUserIds.includes(config.jellyfin.userId)
 
   async function transitionEntryStage(nextStage: EntryStage) {
     if (nextStage === entryStage) {
@@ -242,6 +244,10 @@ function App() {
     }
 
     if (route === 'downloads') {
+      if (!canViewDownloads) {
+        setRoute('home')
+        return
+      }
       void refreshDownloads()
       const interval = window.setInterval(() => {
         void refreshDownloads()
@@ -270,7 +276,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authState, entryStage, route])
+  }, [authState, canViewDownloads, entryStage, route])
 
 
 
@@ -670,6 +676,7 @@ function App() {
     <div className={`omniarr-app ${getEntryTransitionClassName(entryTransitionState)}`}>
       <Sidebar
         busy={busy}
+        canViewDownloads={canViewDownloads}
         connections={connections}
         currentUser={currentJellyfinUser}
         diskSpace={diskSpace}
@@ -694,7 +701,7 @@ function App() {
               />
             ) : null}
             {route === 'calendar' && isRouteAvailable(route, connections) ? <CalendarPage onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} /> : null}
-            {route === 'downloads' && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} processingItems={processingItems} /> : null}
+            {route === 'downloads' && canViewDownloads && isRouteAvailable(route, connections) ? <DownloadsPage busyId={downloadDeleteId} completedDownloads={completedDownloads} downloads={downloads} onDelete={handleDeleteDownload} onDismissAllCompleted={handleDismissAllCompleted} onDismissCompleted={handleDismissCompleted} onOpenCard={(card, originRect) => setSelectedCard({ card, originRect: originRect ?? null })} processingItems={processingItems} /> : null}
             {route === 'search' ? (
               <SearchPage
                 loading={searchLoading}
@@ -775,6 +782,7 @@ function Sidebar(props: {
   connections: ConnectionStatus[]
   busy: boolean
   canManage: boolean
+  canViewDownloads: boolean
   onExitProfile: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -835,7 +843,7 @@ function Sidebar(props: {
           </button>
 
         <div className="sidebar-links">
-          {topSidebarItems.filter((item) => isRouteAvailable(item.route, props.connections)).map((item) => (
+          {topSidebarItems.filter((item) => isRouteAvailable(item.route, props.connections) && (item.route !== 'downloads' || props.canViewDownloads)).map((item) => (
             <button
               className={item.route === props.route ? 'sidebar-link active' : 'sidebar-link'}
               key={item.route}
@@ -4252,6 +4260,11 @@ function SettingsView(props: {
           Region
           <input className="input" maxLength={2} onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, region: event.target.value })} value={props.config.preferences.region} />
         </label>
+        <DownloadsAccess
+          onChange={(downloadsRestrictedUserIds) => props.updateConfig('preferences', { ...props.config.preferences, downloadsRestrictedUserIds })}
+          restrictedUserIds={props.config.preferences.downloadsRestrictedUserIds}
+          users={props.options.jellyfinUsers}
+        />
       </SettingsCard>
 
       <SettingsCard status={getServiceStatus(props.connections, 'jellyfin') ?? notCheckedYet('jellyfin')} title="Jellyfin" {...check}>
@@ -4428,6 +4441,38 @@ function QualityProfileVisibility(props: {
           })}
         </div>
       ) : <p>Save the service connection first to load its quality profiles.</p>}
+    </fieldset>
+  )
+}
+
+function DownloadsAccess(props: {
+  users: SelectOption[]
+  restrictedUserIds: string[]
+  onChange: (userIds: string[]) => void
+}) {
+  return (
+    <fieldset className="quality-profile-visibility">
+      <legend>Who can see Downloads</legend>
+      <p>Untick the profiles that should not open the Downloads page. The administrator always can.</p>
+      {props.users.length ? (
+        <div className="quality-profile-visibility-list">
+          {props.users.map((user) => {
+            const restricted = props.restrictedUserIds.includes(user.id)
+            return (
+              <label key={user.id}>
+                <input
+                  checked={!restricted}
+                  onChange={() => props.onChange(restricted
+                    ? props.restrictedUserIds.filter((id) => id !== user.id)
+                    : [...props.restrictedUserIds, user.id])}
+                  type="checkbox"
+                />
+                <span>{user.label}</span>
+              </label>
+            )
+          })}
+        </div>
+      ) : <p>Connect Jellyfin first to load its profiles.</p>}
     </fieldset>
   )
 }
