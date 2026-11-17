@@ -58,6 +58,21 @@ const topSidebarItems: SidebarItem[] = [
   { route: 'wishlist', label: 'Wishlist', short: 'W', icon: 'wishlist' },
 ]
 
+// Only English is translated today; more can be added here and show up in Settings.
+const LANGUAGE_OPTIONS: SelectOption[] = [{ id: 'en-US', label: 'English (en-US)' }]
+
+const REGION_CODES = [
+  'US', 'GB', 'CA', 'AU', 'NZ', 'IE', 'ES', 'MX', 'AR', 'CL', 'CO', 'PE', 'FR', 'DE', 'IT', 'PT', 'BR',
+  'NL', 'BE', 'SE', 'NO', 'DK', 'FI', 'PL', 'JP', 'KR', 'CN', 'TW', 'IN',
+]
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' })
+const REGION_OPTIONS: SelectOption[] = REGION_CODES.map((code) => ({ id: code, label: `${regionNames.of(code) ?? code} (${code})` }))
+
+// A value saved earlier that is not in the list stays selectable instead of being lost.
+function withCurrentOption(options: SelectOption[], current: string): SelectOption[] {
+  return current && !options.some((option) => option.id === current) ? [{ id: current, label: current }, ...options] : options
+}
+
 const sidebarItems: SidebarItem[] = [
   { route: 'home', label: 'Home', short: 'H', icon: 'home' },
   { route: 'dorama', label: 'K-Drama', short: '아' },
@@ -4244,7 +4259,7 @@ function SettingsView(props: {
 
   return (
     <form className="settings-page" id={props.formId} onSubmit={(event) => void props.onSave(event)}>
-      <SettingsCard title="Connections">
+      <SettingsCard title="Connections" {...check}>
         <div className="settings-connections">
           {SERVICE_KEYS.map((key) => getServiceStatus(props.connections, key) ?? notCheckedYet(key)).map((connection) => (
             <div className="settings-connection" key={connection.key} title={connection.message}>
@@ -4256,20 +4271,35 @@ function SettingsView(props: {
             </div>
           ))}
         </div>
+        <div className="settings-preferences">
+          <label>
+            Language
+            <select
+              className="input"
+              onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, language: event.target.value })}
+              value={props.config.preferences.language}
+            >
+              {withCurrentOption(LANGUAGE_OPTIONS, props.config.preferences.language).map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Region
+            <select
+              className="input"
+              onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, region: event.target.value })}
+              value={props.config.preferences.region}
+            >
+              {withCurrentOption(REGION_OPTIONS, props.config.preferences.region).map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </SettingsCard>
 
-      <SettingsCard title="Preferences" {...check}>
-        <label>
-          Language
-          <input className="input" onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, language: event.target.value })} value={props.config.preferences.language} />
-        </label>
-        <label>
-          Region
-          <input className="input" maxLength={2} onChange={(event) => props.updateConfig('preferences', { ...props.config.preferences, region: event.target.value })} value={props.config.preferences.region} />
-        </label>
-      </SettingsCard>
-
-      <SettingsCard title="Profiles" wide {...check}>
+      <SettingsCard title="Profiles" {...check}>
         <ProfilesAccess
           config={props.config}
           updateConfig={props.updateConfig}
@@ -4375,9 +4405,9 @@ function notCheckedYet(key: ConnectionStatus['key']): ConnectionStatus {
   return { key, label: SERVICE_LABELS[key], ok: false, message: 'Not configured', configured: false, optional: key !== 'jellyfin' }
 }
 
-function SettingsCard({ title, status, busy, onCheck, wide, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; wide?: boolean; children: ReactNode }) {
+function SettingsCard({ title, status, busy, onCheck, children }: { title: string; status?: ConnectionStatus; busy?: boolean; onCheck?: () => Promise<void>; children: ReactNode }) {
   return (
-    <section className={wide ? 'settings-card is-wide' : 'settings-card'}>
+    <section className="settings-card">
       <div className="settings-card-header">
         <h2>{title}</h2>
         {onCheck ? (

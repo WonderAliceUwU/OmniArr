@@ -6075,10 +6075,6 @@ img {
 }
 
 /* Profiles: who sees which sections, and which libraries Jellyfin gives them. */
-.settings-card.is-wide {
-  grid-column: 1 / -1;
-}
-
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -6104,7 +6100,7 @@ img {
 
 .profiles-access-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.6rem;
   margin: 0;
   padding: 0;
@@ -6350,4 +6346,26 @@ img {
   .profile-dialog-body {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.settings-preferences {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.4rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+select.input {
+  appearance: none;
+  padding-right: 2.6rem;
+  background-image: linear-gradient(45deg, transparent 50%, #9ba9c2 50%), linear-gradient(135deg, #9ba9c2 50%, transparent 50%);
+  background-position: calc(100% - 1.3rem) 50%, calc(100% - 0.95rem) 50%;
+  background-size: 0.35rem 0.35rem, 0.35rem 0.35rem;
+  background-repeat: no-repeat;
+}
+
+select.input option {
+  background: #0b0e16;
+  color: #f4f7ff;
 }
