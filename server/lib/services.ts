@@ -193,6 +193,7 @@ interface SonarrCalendarRecord {
   series?: {
     title?: string;
     tmdbId?: number;
+    path?: string;
     images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
     year?: number;
     status?: string;
@@ -243,6 +244,7 @@ interface RadarrCalendarRecord {
   digitalRelease?: string;
   monitored?: boolean;
   hasFile?: boolean;
+  path?: string;
   images?: Array<{ coverType?: string; remoteUrl?: string; url?: string }>;
 }
 
@@ -405,8 +407,7 @@ export function sanitizeConfig(input: AppConfig): AppConfig {
       radarrDownloadQualityProfileIds: Array.isArray(input.preferences.radarrDownloadQualityProfileIds)
         ? input.preferences.radarrDownloadQualityProfileIds.map(String)
         : [],
-      hiddenSections: sanitizeHiddenSections(input.preferences.hiddenSections),
-      filterUpcomingByLibrary: Boolean(input.preferences.filterUpcomingByLibrary)
+      hiddenSections: sanitizeHiddenSections(input.preferences.hiddenSections)
     },
     jellyfin: {
       baseUrl: normalizeBaseUrl(input.jellyfin.baseUrl),
@@ -772,19 +773,16 @@ export async function getCalendar(config: AppConfig, start: Date, end: Date): Pr
   // tell which episodes are already in the library.
   const library = await getLibrarySnapshot(config).catch(() => null);
 
-  // With the setting on, a profile's calendar is the releases of the titles in the
-  // libraries it can open: Jellyfin answers per user with exactly those titles.
-  const ownTitles = config.preferences.filterUpcomingByLibrary && config.jellyfin.userId && library
-    ? new Set(library.allItems.map(getTmdbTitleKey).filter(Boolean))
-    : null;
+  // A profile does not see releases that will be stored in a library it cannot open.
+  const hiddenFolders = await getHiddenLibraryFolders(config);
   const sonarrItems = sonarrResult.status === 'fulfilled'
     ? sonarrResult.value
-        .filter((item) => !ownTitles || ownTitles.has(`series:${Number(item.series?.tmdbId)}`))
+        .filter((item) => !isInFolders(item.series?.path, hiddenFolders))
         .map((item) => mapSonarrCalendarEntry(item))
     : []
   const radarrItems = radarrResult.status === 'fulfilled'
     ? radarrResult.value
-        .filter((item) => !ownTitles || ownTitles.has(`movie:${Number(item.tmdbId)}`))
+        .filter((item) => !isInFolders(item.path, hiddenFolders))
         .map((item) => mapRadarrCalendarEntry(item))
     : []
   const libraryProviderIds = new Map<string, string>();
@@ -827,9 +825,51 @@ function normalizeLibraryId(id: string | undefined): string {
   return String(id || '').replace(/-/g, '').toLowerCase();
 }
 
-function getTmdbTitleKey(item: JellyfinItem): string {
-  const tmdbId = Number(item.ProviderIds?.Tmdb);
-  return tmdbId ? `${item.Type === 'Movie' ? 'movie' : 'series'}:${tmdbId}` : '';
+function getFolderNames(locations: string[] | undefined): string[] {
+  return (locations ?? [])
+    .map((location) => location.replace(/\\/g, '/').split('/').filter(Boolean).pop()?.toLowerCase() ?? '')
+    .filter(Boolean);
+}
+
+// Sonarr and Radarr rarely see a folder under the same path as Jellyfin (they
+// mount it differently), so a release is matched to a library by the folder
+// name: a series stored in /shared/Library/Shows/X belongs to the library whose
+// folder is called "Shows".
+export function isInFolders(path: string | undefined, folderNames: string[] | null): boolean {
+  if (!path || !folderNames?.length) {
+    return false;
+  }
+  // The last segment is the title's own folder, not a library.
+  const parents = path.replace(/\\/g, '/').split('/').filter(Boolean).slice(0, -1).map((segment) => segment.toLowerCase());
+  return parents.some((segment) => folderNames.includes(segment));
+}
+
+// The folder names of the libraries the signed-in profile cannot open, read
+// from Jellyfin (its libraries, and the ones in the profile's views). Admin
+// sessions have no profile and see everything.
+async function getHiddenLibraryFolders(config: AppConfig): Promise<string[] | null> {
+  if (!config.jellyfin.userId || !config.jellyfin.baseUrl || !config.jellyfin.apiKey) {
+    return null;
+  }
+
+  try {
+    const [folders, views] = await Promise.all([
+      jellyfinFetch<Array<{ ItemId?: string; Locations?: string[] }>>(config, '/Library/VirtualFolders'),
+      jellyfinFetch<JellyfinItem[]>(config, `/UserViews?userId=${encodeURIComponent(config.jellyfin.userId)}`)
+    ]);
+    const visibleLibraryIds = new Set(views.map((view) => normalizeLibraryId(view.Id)));
+    const visibleNames = new Set(folders.filter((folder) => visibleLibraryIds.has(normalizeLibraryId(folder.ItemId))).flatMap((folder) => getFolderNames(folder.Locations)));
+    // A name shared with a library the profile can open stays visible.
+    const hidden = folders
+      .filter((folder) => folder.ItemId && !visibleLibraryIds.has(normalizeLibraryId(folder.ItemId)))
+      .flatMap((folder) => getFolderNames(folder.Locations))
+      .filter((name) => !visibleNames.has(name));
+    return hidden.length ? [...new Set(hidden)] : null;
+  } catch (error) {
+    // Better to show the calendar than to break it when Jellyfin cannot be asked.
+    console.warn('Could not read the profile libraries; the calendar is not filtered.', error);
+    return null;
+  }
 }
 
 // What Jellyfin lets each profile open, for the administrator to review; the

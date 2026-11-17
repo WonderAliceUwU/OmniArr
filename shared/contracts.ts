@@ -76,8 +76,6 @@ export interface AppPreferences {
   radarrDownloadQualityProfileIds: string[];
   /** Sections switched off for each Jellyfin profile, by user id; a profile that is not listed sees everything. */
   hiddenSections: Record<string, HideableSection[]>;
-  /** Upcoming only lists releases for titles in the Jellyfin libraries the signed-in profile can open. */
-  filterUpcomingByLibrary: boolean;
 }
 
 export interface ProfileLibraryAccess {
@@ -422,8 +420,7 @@ export const defaultConfig: AppConfig = {
     animationLevel: 'smooth',
     sonarrDownloadQualityProfileIds: [],
     radarrDownloadQualityProfileIds: [],
-    hiddenSections: {},
-    filterUpcomingByLibrary: false
+    hiddenSections: {}
   },
   jellyfin: {
     baseUrl: '',

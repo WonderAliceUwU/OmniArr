@@ -33,6 +33,7 @@ If OmniArr is useful to you, you can support its development on [Ko-fi](https://
   <img width="4208" height="2562" alt="Screenshot 2026-10-13 at 09 47 49" src="https://github.com/user-attachments/assets/82766b80-fb0d-4ff2-b594-203e6b52828f" />
 
 - A download manager to see what's cooking.
+- Per-profile control of which sections each person sees (see [Profiles](#profiles)).
 
 And many things more!
 
@@ -121,6 +122,48 @@ The production build can be checked with:
 npm run lint
 npm run build
 ```
+
+## Profiles
+
+Open **Administration → Profiles** to see every Jellyfin profile. Selecting one
+opens its settings:
+
+- **Sections** are on/off switches for Search, Upcoming, Downloads, Wishlist,
+  K-Drama, Anime, Library and each network. Everything is on by default and
+  Home is always available. A hidden section disappears from the menu and the
+  server refuses its requests for that profile. The administrator always sees
+  everything.
+- **Libraries** shows which Jellyfin libraries the profile can open. It is read
+  from Jellyfin and cannot be changed here; manage it in Jellyfin.
+
+Save with the check button of the Profiles card.
+
+### Upcoming and library access
+
+Upcoming comes from Sonarr and Radarr, which know nothing about Jellyfin
+permissions. To keep each profile's calendar to what it can open, OmniArr asks
+Jellyfin for the libraries a profile cannot open and leaves out the releases
+that are stored in them.
+
+Sonarr, Radarr and Jellyfin often mount the media folder under different paths
+(for example `/shared/Library/Anime` for Sonarr and `/library/Anime` for
+Jellyfin), so a release is matched to a library by the **name of the library
+folder** found in the series or movie path. Keep that folder name the same in
+all three apps. A release whose path does not contain the name of any library is
+shown to everyone, and if Jellyfin cannot be reached the calendar is not
+filtered.
+
+## Tests
+
+```bash
+npm test
+```
+
+The tests run against small stand-ins for Jellyfin, Sonarr and Radarr
+(`server/test/mock-services.ts`). To point a running OmniArr at them while
+developing, start them with `node dist-server/server/test/mock-services.js` after
+a build; it prints the three URLs, accepts any API key and offers a `full`
+profile and a `limited` one that cannot open Anime or Anime Movies.
 
 ## Data and security
 

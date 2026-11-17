@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from './api'
 import {
   type CalendarEntry,
@@ -4463,6 +4464,7 @@ function ProfilesAccess(props: {
   const [accessError, setAccessError] = useState('')
   const [openUserId, setOpenUserId] = useState('')
   const preferences = props.config.preferences
+  const openUser = props.users.find((user) => user.id === openUserId)
 
   useEffect(() => {
     if (!props.users.length) {
@@ -4484,6 +4486,17 @@ function ProfilesAccess(props: {
     }
   }, [props.users.length])
 
+  useEffect(() => {
+    if (!openUser) {
+      return
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenUserId('')
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [openUser])
+
   function setSectionVisible(userId: string, section: HideableSection, visible: boolean) {
     const current = preferences.hiddenSections[userId] ?? []
     const next = visible ? current.filter((id) => id !== section) : [...current.filter((id) => id !== section), section]
@@ -4503,32 +4516,15 @@ function ProfilesAccess(props: {
   return (
     <div className="profiles-access">
       <p className="profiles-access-note">
-        Pick a profile to choose which sections it sees. Libraries come from its Jellyfin permissions and are managed there.
+        Pick a profile to choose which sections it sees and review the libraries Jellyfin gives it.
+        Upcoming also leaves out releases stored in libraries a profile cannot open.
       </p>
-      <label className="profiles-access-option">
-        <span>
-          <strong>Separate Upcoming for each profile</strong>
-          <small>Each profile only sees upcoming releases for the titles in the libraries it can open. Releases not in Jellyfin yet are left out.</small>
-        </span>
-        <ToggleSwitch
-          checked={preferences.filterUpcomingByLibrary}
-          label="Separate Upcoming for each profile"
-          onChange={(filterUpcomingByLibrary) => props.updateConfig('preferences', { ...preferences, filterUpcomingByLibrary })}
-        />
-      </label>
       <ul className="profiles-access-list">
         {props.users.map((user) => {
-          const open = openUserId === user.id
           const hidden = preferences.hiddenSections[user.id] ?? []
-          const profileAccess = access.find((entry) => entry.userId === user.id)
           return (
-            <li className={open ? 'profiles-access-item is-open' : 'profiles-access-item'} key={user.id}>
-              <button
-                aria-expanded={open}
-                className="profiles-access-summary"
-                onClick={() => setOpenUserId(open ? '' : user.id)}
-                type="button"
-              >
+            <li key={user.id}>
+              <button className="profiles-access-summary" onClick={() => setOpenUserId(user.id)} type="button">
                 <ProfileAvatar user={user} />
                 <span className="profiles-access-name">{user.label}</span>
                 <span className="profiles-access-meta">
@@ -4536,48 +4532,72 @@ function ProfilesAccess(props: {
                 </span>
                 <span aria-hidden="true" className="profiles-access-chevron" />
               </button>
-              {open ? (
-                <div className="profiles-access-detail">
-                  <div>
-                    <h3>Sections</h3>
-                    <div className="profiles-access-sections">
-                      {HIDEABLE_SECTIONS.map((section) => (
-                        <label className="profiles-access-section" key={section.id}>
-                          <span>{section.label}</span>
-                          <ToggleSwitch
-                            checked={!hidden.includes(section.id)}
-                            label={`${section.label} for ${user.label}`}
-                            onChange={(visible) => setSectionVisible(user.id, section.id, visible)}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <h3>Libraries</h3>
-                    {profileAccess ? (
-                      <>
-                        {profileAccess.allLibraries ? <p className="profiles-access-note">Can open every library.</p> : null}
-                        <ul className="profiles-access-libraries">
-                          {profileAccess.libraries.map((library) => (
-                            <li className={library.access ? 'has-access' : 'no-access'} key={library.id}>
-                              <span aria-hidden="true">{library.access ? '✓' : '✕'}</span>
-                              <span>{library.name}</span>
-                              <span className="visually-hidden">{library.access ? 'has access' : 'no access'}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : (
-                      <p className="profiles-access-note">{accessError || 'Loading libraries…'}</p>
-                    )}
-                  </div>
-                </div>
-              ) : null}
             </li>
           )
         })}
       </ul>
+      {openUser ? createPortal(
+        <div className="profile-dialog-backdrop" onClick={() => setOpenUserId('')}>
+          <div
+            aria-label={`${openUser.label} settings`}
+            aria-modal="true"
+            className="profile-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="profile-dialog-header">
+              <ProfileAvatar user={openUser} />
+              <div>
+                <h2>{openUser.label}</h2>
+                <p>Changes are saved with the check button of the Profiles card.</p>
+              </div>
+              <button aria-label="Close" className="profile-dialog-close" onClick={() => setOpenUserId('')} type="button">×</button>
+            </header>
+            <div className="profile-dialog-body">
+              <section>
+                <h3>Sections</h3>
+                <div className="profiles-access-sections">
+                  {HIDEABLE_SECTIONS.map((section) => (
+                    <label className="profiles-access-section" key={section.id}>
+                      <span>{section.label}</span>
+                      <ToggleSwitch
+                        checked={!(preferences.hiddenSections[openUser.id] ?? []).includes(section.id)}
+                        label={`${section.label} for ${openUser.label}`}
+                        onChange={(visible) => setSectionVisible(openUser.id, section.id, visible)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <h3>Libraries</h3>
+                {(() => {
+                  const profileAccess = access.find((entry) => entry.userId === openUser.id)
+                  if (!profileAccess) {
+                    return <p className="profiles-access-note">{accessError || 'Loading libraries…'}</p>
+                  }
+                  return (
+                    <>
+                      {profileAccess.allLibraries ? <p className="profiles-access-note">Can open every library.</p> : null}
+                      <ul className="profiles-access-libraries">
+                        {profileAccess.libraries.map((library) => (
+                          <li className={library.access ? 'has-access' : 'no-access'} key={library.id}>
+                            <span aria-hidden="true">{library.access ? '✓' : '✕'}</span>
+                            <span>{library.name}</span>
+                            <span className="visually-hidden">{library.access ? 'has access' : 'no access'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="profiles-access-note">Managed in Jellyfin.</p>
+                    </>
+                  )
+                })()}
+              </section>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
     </div>
   )
 }
