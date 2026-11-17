@@ -4586,10 +4586,11 @@ function ProfilesAccess(props: {
             <div className="profile-dialog-body">
               <section>
                 <h3>Sections</h3>
-                <div className="profiles-access-sections">
+                <div className="profile-sections">
                   {HIDEABLE_SECTIONS.map((section) => (
-                    <label className="profiles-access-section" key={section.id}>
-                      <span>{section.label}</span>
+                    <label className="profile-section-row" key={section.id}>
+                      <span className="profile-section-icon">{renderSectionIcon(section.id)}</span>
+                      <span className="profile-section-label">{section.label}</span>
                       <ToggleSwitch
                         checked={!(preferences.hiddenSections[openUser.id] ?? []).includes(section.id)}
                         label={`${section.label} for ${openUser.label}`}
@@ -4608,17 +4609,15 @@ function ProfilesAccess(props: {
                   }
                   return (
                     <>
-                      {profileAccess.allLibraries ? <p className="profiles-access-note">Can open every library.</p> : null}
-                      <ul className="profiles-access-libraries">
+                      <ul className="profile-libraries">
                         {profileAccess.libraries.map((library) => (
-                          <li className={library.access ? 'has-access' : 'no-access'} key={library.id}>
-                            <span aria-hidden="true">{library.access ? '✓' : '✕'}</span>
-                            <span>{library.name}</span>
-                            <span className="visually-hidden">{library.access ? 'has access' : 'no access'}</span>
+                          <li className={library.access ? 'profile-library-row has-access' : 'profile-library-row no-access'} key={library.id}>
+                            <span className="profile-library-name">{library.name}</span>
+                            <span className="profile-library-state">{library.access ? 'Has access' : 'No access'}</span>
                           </li>
                         ))}
                       </ul>
-                      <p className="profiles-access-note">Managed in Jellyfin.</p>
+                      <p className="profiles-access-note">{profileAccess.allLibraries ? 'Can open every library. ' : ''}Managed in Jellyfin.</p>
                     </>
                   )
                 })()}
@@ -4630,6 +4629,23 @@ function ProfilesAccess(props: {
       ) : null}
     </div>
   )
+}
+
+// The icon each section has in the sidebar, for the profile settings.
+function renderSectionIcon(section: HideableSection) {
+  switch (section) {
+    case 'search': return <SearchGlyph />
+    case 'calendar': return <CalendarGlyph />
+    case 'downloads': return <DownloadGlyph />
+    case 'wishlist': return <HeartGlyph />
+    case 'library': return <LibraryGlyph />
+    case 'dorama': return <span className="profile-section-letter">아</span>
+    case 'anime': return <span className="profile-section-letter">あ</span>
+    default: {
+      const network = networkSidebarItems.find((item) => item.route === section)
+      return network ? <img alt="" className={network.iconClassName || 'sidebar-network-icon-image'} src={network.icon} /> : null
+    }
+  }
 }
 
 function ToggleSwitch(props: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
