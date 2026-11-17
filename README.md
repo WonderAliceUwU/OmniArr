@@ -160,7 +160,9 @@ npm test
 ```
 
 The tests run against small stand-ins for Jellyfin, Sonarr and Radarr
-(`server/test/mock-services.ts`). To point a running OmniArr at them while
+(`server/test/mock-services.ts`). Some call the code directly and `api.e2e.test.ts`
+starts the real server and signs in as the administrator and as profiles, so it
+checks what each of them receives from the API. To point a running OmniArr at them while
 developing, start them with `node dist-server/server/test/mock-services.js` after
 a build; it prints the three URLs, accepts any API key and offers a `full`
 profile and a `limited` one that cannot open Anime or Anime Movies.

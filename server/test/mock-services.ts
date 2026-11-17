@@ -41,16 +41,25 @@ function listen(server: Server): Promise<string> {
   });
 }
 
-function jsonServer(handler: (path: string, query: URLSearchParams) => unknown): Server {
+function jsonServer(handler: (path: string, query: URLSearchParams, body: string) => unknown): Server {
   return createServer((request, response) => {
     const url = new URL(request.url || '/', 'http://localhost');
-    response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify(handler(url.pathname, url.searchParams)));
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(handler(url.pathname, url.searchParams, Buffer.concat(chunks).toString('utf8'))));
+    });
   });
 }
 
 export async function startMockServices() {
-  const jellyfin = jsonServer((path, query) => {
+  const jellyfin = jsonServer((path, query, body) => {
+    // Any password signs a profile in, so the app's own login can be exercised.
+    if (path === '/Users/AuthenticateByName') {
+      const username = (JSON.parse(body || '{}') as { Username?: string }).Username;
+      return { User: { Id: MOCK_USERS.find((user) => user.Name === username)?.Id } };
+    }
     if (path === '/Library/VirtualFolders') {
       return MOCK_LIBRARIES;
     }
